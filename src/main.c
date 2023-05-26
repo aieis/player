@@ -8,6 +8,8 @@
 #include <gst/app/gstappsink.h>
 #include <gst/app/gstappsrc.h>
 
+#include "parse_spec.h"
+
 static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
 {
     GstFlowReturn ret;
@@ -102,13 +104,21 @@ playback_run(void* thread_data)
 
 }
 
-int find_next()
+clip_t find_next(clip_t** sequences, clip_t clip)
 {
-    return rand() % 40000;
+    int jind =  rand() % clip.njumps;
+    int addr[2];
+    addr[0] = clip.addresses[jind * 2];
+    addr[1] = clip.addresses[jind * 2 + 1];
+    clip_t next = get_clip(sequences, &addr);
+
+    printf("Transition: (s%d.%d %d %d => s%d.%d %d %d)\n", clip.address[0], clip.address[1], clip.start, clip.end
+           , next.address[0], next.address[1], next.start, next.end);
+    return next;
 }
 
 int
-main_player()
+main_player(clip_t** sequences, int (*start_address)[2])
 {
     GstElement *pipeline;
     const char* pipe_args =
@@ -177,7 +187,15 @@ main_player()
     double elapsedTime;
     gettimeofday(&t2, NULL);
 
-    int frame = 0;
+    clip_t cclip = get_clip(sequences, start_address);
+    int start = cclip.start;
+    int end = cclip.end;
+    gint64 frame_time = ((gint64) start) / 30;
+    gst_element_seek (pipeline, 1, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+                      frame_time * GST_SECOND,
+                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+    
+    int frame = start;
     while (1) {
         t1 = t2;
         GstSample *sample_frame = gst_app_sink_pull_sample(appsink);
@@ -195,21 +213,25 @@ main_player()
         gettimeofday(&t2, NULL);
         elapsedTime = (t2.tv_sec - t1.tv_sec);
         elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000000.0;   // us to ms
-        printf("Frame decode time: %f\n", elapsedTime);
+        //printf("Frame decode time: %f\n", elapsedTime);
 
-        if (frame % 100 == 99) {
-            int f = find_next();
-            gint64 frame_time = ((gint64 )f)  / 30;
-            printf("Seeking frame %d => %ld \n", f, frame_time);
-
+        frame++;
+        if (frame == end + 1) {
+            cclip = find_next(sequences, cclip);
+            start = cclip.start + 1;
+            frame = start;
+            frame_time = ((gint64 )start)  / 30;
             if (!gst_element_seek (pipeline, 1, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
                                    frame_time * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
+
+            printf("Seeking frame %d => %ld \n", start, 0);
+            end = cclip.end;
         }
         
-        frame++;
+        
         
     }
 
@@ -219,9 +241,10 @@ main_player()
 }
 
 int main(int argc, char** argv) {
-
+    int start[2];
+    clip_t** sequences = parse_spec("./vid/spec.txt", &start);
     /* init GStreamer */
     gst_init (&argc, &argv);
-    main_player();
+    main_player(sequences, &start);
     return 0;
 }
