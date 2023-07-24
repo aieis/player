@@ -31,6 +31,7 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
 
     timestamp += GST_BUFFER_DURATION (buffer);
     g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
+
 }
 
 
@@ -58,6 +59,7 @@ bus_call (GstBus     *bus,
         break;
     }
     default:
+        printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
         break;
     }
 
@@ -119,17 +121,19 @@ clip_t find_next(clip_t** sequences, clip_t clip)
 int
 main_player(clip_t** sequences, int (*start_address)[2])
 {
+
     GstElement *pipeline;
     const char* pipe_args =
-        "filesrc location=./vid/vid.mp4 name=filesrc"
+        "filesrc location=./vid/vid_f.mp4 name=filesrc"
         " ! decodebin"
+        " ! videoflip video-direction=3"
         " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! appsink name=sink";
-    //            " ! videoflip video-direction=3"
+
 
     pipeline = gst_parse_launch(pipe_args, NULL);
     GstBus* bus = gst_element_get_bus(pipeline);
     gst_element_set_state(pipeline, GST_STATE_PLAYING);
-
+    
     guint bus_watch_id = gst_bus_add_watch (bus, bus_call, NULL);
     gst_object_unref(bus);
     
@@ -138,7 +142,6 @@ main_player(clip_t** sequences, int (*start_address)[2])
         printf("sink is NULL\n");
         return -1;
     }
-
     
     GstElement *src = gst_bin_get_by_name(GST_BIN(pipeline), "filesrc");
     if (!src) {
@@ -156,7 +159,7 @@ main_player(clip_t** sequences, int (*start_address)[2])
         printf("sample is NULL\n");
         return -1;
     }
-
+    
     GstCaps* caps = gst_sample_get_caps(sample);
     GstStructure* structure = gst_caps_get_structure(caps, 0);
 
@@ -189,10 +192,12 @@ main_player(clip_t** sequences, int (*start_address)[2])
     clip_t cclip = get_clip(sequences, start_address);
     int start = cclip.start;
     int end = cclip.end;
+
+    
     double frame_time = ((double) start) / 30;
     gst_element_seek (pipeline, 1, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
                       frame_time * GST_SECOND,
-                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);    
     
     int frame = start;
     while (1) {
@@ -212,15 +217,14 @@ main_player(clip_t** sequences, int (*start_address)[2])
         gettimeofday(&t2, NULL);
         elapsedTime = (t2.tv_sec - t1.tv_sec);
         elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000000.0;   // us to ms
-        printf("Frame decode time: %f\n", elapsedTime);
-
+        
         frame++;
         if (frame  == end) {
             cclip = find_next(sequences, cclip);
             start = cclip.start;
             frame = start;
             frame_time = ((double) frame - 1)  / 30;
-            if (!gst_element_seek (pipeline, 1, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+            if (!gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET  ,
                                    frame_time * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");

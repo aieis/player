@@ -1,8 +1,10 @@
 GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 
-INCS = $(GSTINC) -Iinclude
-LIBS = $(GSTLIB)
+GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
+GTKLIB =  $(shell pkg-config --libs gtk+-2.0)	
+INCS = $(GSTINC) -Iinclude $(GTKINC)
+LIBS = $(GSTLIB) $(GTKLIB)
 
 CC = gcc -g
 LD = gcc -g
