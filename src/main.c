@@ -1,13 +1,18 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <pthread.h>
 #include <stdint.h>
+
+
+#include <time.h>
 #include <unistd.h>
+#include <pthread.h>
+
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
 #include <gst/app/gstappsrc.h>
 
+#include "gst/gstbuffer.h"
 #include "parse_spec.h"
 
 static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
@@ -17,7 +22,7 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
     static GstClockTime timestamp = 0;
       
     GstMapInfo map_og;
-    gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);
+    gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);    
       
     size_t size = gst_buffer_get_size(buffer_og);
     GstBuffer *buffer = gst_buffer_new_allocate (NULL, size, NULL);
@@ -25,6 +30,7 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
     GstMapInfo map;
     gst_buffer_map (buffer, &map, GST_MAP_WRITE);
     memcpy( (uint8_t *)map.data, (uint8_t *) map_og.data,  gst_buffer_get_size( buffer ) );
+    gst_buffer_unmap(buffer_og, &map_og);
       
     GST_BUFFER_PTS (buffer) = timestamp;
     GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
@@ -32,6 +38,8 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
     timestamp += GST_BUFFER_DURATION (buffer);
     g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
 
+    gst_buffer_unmap(buffer, &map);
+    gst_buffer_unref(buffer);
 }
 
 
@@ -107,7 +115,7 @@ playback_run(void* thread_data)
 
 clip_t find_next(clip_t** sequences, clip_t clip)
 {
-    int jind =  rand() % clip.njumps;
+    int jind = rand() % clip.njumps;
     int addr[2];
     addr[0] = clip.addresses[jind * 2];
     addr[1] = clip.addresses[jind * 2 + 1];
@@ -121,7 +129,8 @@ clip_t find_next(clip_t** sequences, clip_t clip)
 int
 main_player(clip_t** sequences, int (*start_address)[2])
 {
-
+    srand(time(NULL));
+        
     GstElement *pipeline;
     const char* pipe_args =
         "filesrc location=./vid/vid_f.mp4 name=filesrc"
