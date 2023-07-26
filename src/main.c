@@ -17,10 +17,7 @@
 
 static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
 {
-    GstFlowReturn ret;
-
     static GstClockTime timestamp = 0;
-      
     GstMapInfo map_og;
     gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);    
       
@@ -36,10 +33,8 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
     GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
 
     timestamp += GST_BUFFER_DURATION (buffer);
-    g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
-
+    gst_app_src_push_buffer(GST_APP_SRC(appsrc), buffer);
     gst_buffer_unmap(buffer, &map);
-    gst_buffer_unref(buffer);
 }
 
 
