@@ -1,3 +1,4 @@
+#include <argp.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -122,16 +123,19 @@ clip_t find_next(clip_t** sequences, clip_t clip)
 }
 
 int
-main_player(clip_t** sequences, int (*start_address)[2])
+main_player(char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
 {
     srand(time(NULL));
         
     GstElement *pipeline;
-    const char* pipe_args =
-        "filesrc location=./vid/vid_f.mp4 name=filesrc"
+    const char* pipe_args_fmt =
+        "filesrc location=%s name=filesrc"
         " ! decodebin"
-        " ! videoflip video-direction=3"
+        " ! videoflip video-direction=%d"
         " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! appsink name=sink";
+
+    char pipe_args[2048];
+    sprintf(pipe_args, pipe_args_fmt, movie, flip_method);
 
 
     pipeline = gst_parse_launch(pipe_args, NULL);
@@ -249,11 +253,46 @@ main_player(clip_t** sequences, int (*start_address)[2])
     return 0;
 }
 
-int main(int argc, char** argv) {
+
+
+char* movie = "./vid/vid.mp4";
+char* spec = "./vid/spec.txt";
+int flip = 0;
+
+static int parse_opt (int key, char * arg, struct argp_state *state)
+{
+    switch (key) {
+    case 'm':
+        movie = arg;
+        break;
+    case 's':
+        spec = arg;
+        break;
+    case 'r':
+        flip = atoi(arg);
+        break;
+    }
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    struct argp_option options[] = {
+        {"movie", 'm', "path_to_movie", 0, "Specify path to the movie file"},
+        {"spec", 's', "path_to_spec", 0, "Specify path to the spect file"},
+        {"rot", 'r', "rotation_num", 0, "Specify rotation methon"},
+        {0}
+    };
+
+    struct argp argp = {options, parse_opt};
+    argp_parse(&argp, argc, argv, 0, 0, 0);
+
+    printf("%s %s %d\n", movie, spec, flip);
+    
     int start[2];
-    clip_t** sequences = parse_spec("./vid/spec.txt", &start);
+    clip_t** sequences = parse_spec(spec, &start);
     /* init GStreamer */
     gst_init (&argc, &argv);
-    main_player(sequences, &start);
+    main_player(movie, flip, sequences, &start);
     return 0;
 }
