@@ -132,7 +132,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
         "filesrc location=%s name=filesrc"
         " ! decodebin"
         " ! videoflip video-direction=%d"
-        " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! appsink name=sink";
+        " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! queue ! appsink name=sink";
 
     char pipe_args[2048];
     sprintf(pipe_args, pipe_args_fmt, movie, flip_method);
@@ -202,10 +202,10 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
     int end = cclip.end;
 
     
-    double frame_time = ((double) start) / 30;
-    gst_element_seek (pipeline, 1, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+    double frame_time = ((double) start - 1) / 30;
+    gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET  ,
                       frame_time * GST_SECOND,
-                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);    
+                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
     
     int frame = start;
     while (1) {
@@ -220,6 +220,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
         }
 
         push_to_src(info.appsrc, buffer);
+
         gst_sample_unref(sample_frame);
         
         gettimeofday(&t2, NULL);
