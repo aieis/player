@@ -1,10 +1,13 @@
 GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 
+GLFWINC = $(shell pkg-config --cflags glfw3)
+GLFWLIB = $(shell pkg-config --libs glfw3)
+
 GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
 GTKLIB =  $(shell pkg-config --libs gtk+-2.0)	
-INCS = $(GSTINC) -Iinclude $(GTKINC)
-LIBS = $(GSTLIB) $(GTKLIB)
+INCS = $(GSTINC) -Iinclude $(GTKINC) $(GLFWINC)
+LIBS = $(GSTLIB) $(GTKLIB) $(GLFWLIB)
 
 CC = gcc -g
 LD = gcc -g
@@ -15,7 +18,7 @@ SRCDIR	= src
 OBJDIR	= obj
 TARGET	= lamina
 
-SRCEXT	= .c
+SRCEXT	= .cpp
 OBJEXT	= .o
 
 SRCTREE	= $(shell find $(SRCDIR) -type d)

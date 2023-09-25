@@ -83,7 +83,7 @@ bool insert_jumps(clip_t** sequences, char* line)
 
     if (index + 1 >= clip->addrsize) {
         int nmax = clip->addrsize * 1.5 + 2;
-        clip->addresses = realloc(clip->addresses, nmax * sizeof(int));
+        clip->addresses = (int*) realloc(clip->addresses, nmax * sizeof(int));
         clip->addrsize = nmax;
     }
     clip->addresses[index] = jump_address[0];
@@ -106,8 +106,8 @@ bool insert_clip(clip_t*** sequences_p, int* max_seq, int** max_clips_p, clip_t 
         int nmax = seq_id * 1.5 + 1;
         printf("cmax - nmax: %d - %d\n", cmax, nmax);
         
-        sequences = realloc(sequences, nmax * sizeof(clip_t*));
-        max_clips = realloc(max_clips, nmax * sizeof(int));
+        sequences = (clip_t**) realloc(sequences, nmax * sizeof(clip_t*));
+        max_clips = (int *) realloc(max_clips, nmax * sizeof(int));
         
         memset(sequences + cmax, 0, (nmax - cmax) * sizeof(clip_t*));
         memset(max_clips + cmax, 0, (nmax - cmax) * sizeof(int));
@@ -117,7 +117,7 @@ bool insert_clip(clip_t*** sequences_p, int* max_seq, int** max_clips_p, clip_t 
     int cclip_max = max_clips[seq_id];
     if (clip_id >= cclip_max) {
         int nmax = clip_id * 1.5 + 1;
-        sequences[seq_id] = realloc(sequences[seq_id], nmax * sizeof(clip_t));
+        sequences[seq_id] = (clip_t*) realloc(sequences[seq_id], nmax * sizeof(clip_t));
         memset(sequences[seq_id] + cclip_max, 0, (nmax - cclip_max) * sizeof(clip_t));
         max_clips[seq_id] = nmax;
     }
