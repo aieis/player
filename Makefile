@@ -1,46 +1,86 @@
 GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 
-GLFWINC = $(shell pkg-config --cflags glfw3)
+GLFWINC = $(shell pkg-config --cflags glfw3) 
 GLFWLIB = $(shell pkg-config --libs glfw3)
 
 GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
 GTKLIB =  $(shell pkg-config --libs gtk+-2.0)	
-INCS = $(GSTINC) -Iinclude $(GTKINC) $(GLFWINC)
+INCS = $(GSTINC) -Iinclude $(GTKINC) $(GLFWINC) -Iextern/imgui
 LIBS = $(GSTLIB) $(GTKLIB) $(GLFWLIB)
 
-CC = gcc -g
-LD = gcc -g
-CFLAGS=-pedantic -Wall -Os $(INCS)
-LDFLAGS=$(LIBS)
+EXE = lamina
 
-SRCDIR	= src
-OBJDIR	= obj
-TARGET	= lamina
+IMGUI_DIR = extern/imgui
+SOURCES = src/main.cpp src/parse_spec.cpp
+SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
+SOURCES += $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+OBJSTMP = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
+OBJS = $(foreach O, $(OBJSTMP), $(shell basename $(O) | sed 's/^/obj\//'))
+UNAME_S := $(shell uname -s)
+LINUX_GL_LIBS = -lGL
 
-SRCEXT	= .cpp
-OBJEXT	= .o
+CXXFLAGS = -std=c++11 -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
+CXXFLAGS += -g -Wall -Wformat
+CXXFLAGS +=-pedantic -Wall -Os $(INCS)
 
-SRCTREE	= $(shell find $(SRCDIR) -type d)
-SRCS	= $(shell find $(SRCDIR) -type f -name '*$(SRCEXT)')
-OBJTREE	= $(foreach D,$(SRCTREE),$(shell echo $(D) | sed 's/$(SRCDIR)/$(OBJDIR)/'))
-OBJSTMP	= $(foreach F,$(SRCS),$(shell echo $(F) | sed -e 's/$(SRCDIR)/$(OBJDIR)/'))
-OBJS	= $(foreach O,$(OBJSTMP),$(shell echo $(O) | sed -e 's/\$(SRCEXT)/\$(OBJEXT)/'))
+##---------------------------------------------------------------------
+## OPENGL ES
+##---------------------------------------------------------------------
 
-all: $(TARGET)	
-	@echo Done.
+## This assumes a GL ES library available in the system, e.g. libGLESv2.so
+# CXXFLAGS += -DIMGUI_IMPL_OPENGL_ES2
+# LINUX_GL_LIBS = -lGLESv2
 
-run: $(TARGET)
-	@./$(TARGET)
+##---------------------------------------------------------------------
+## BUILD FLAGS PER PLATFORM
+##---------------------------------------------------------------------
+
+ifeq ($(UNAME_S), Linux) #LINUX
+	ECHO_MESSAGE = "Linux"
+	LIBS += $(LINUX_GL_LIBS) `pkg-config --static --libs glfw3`
+
+	CXXFLAGS += `pkg-config --cflags glfw3`
+	CFLAGS = $(CXXFLAGS)
+endif
+
+ifeq ($(UNAME_S), Darwin) #APPLE
+	ECHO_MESSAGE = "Mac OS X"
+	LIBS += -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
+	LIBS += -L/usr/local/lib -L/opt/local/lib -L/opt/homebrew/lib
+	#LIBS += -lglfw3
+	LIBS += -lglfw
+
+	CXXFLAGS += -I/usr/local/include -I/opt/local/include -I/opt/homebrew/include
+	CFLAGS = $(CXXFLAGS)
+endif
+
+ifeq ($(OS), Windows_NT)
+	ECHO_MESSAGE = "MinGW"
+	LIBS += -lglfw3 -lgdi32 -lopengl32 -limm32
+
+	CXXFLAGS += `pkg-config --cflags glfw3`
+	CFLAGS = $(CXXFLAGS)
+endif
+
+##---------------------------------------------------------------------
+## BUILD RULES
+##---------------------------------------------------------------------
+
+obj/%.o:src/%.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+obj/%.o:$(IMGUI_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+obj/%.o:$(IMGUI_DIR)/backends/%.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+all: $(EXE)
+	@echo Build complete for $(ECHO_MESSAGE)
+
+$(EXE): $(OBJS)
+	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS)
 
 clean:
-	@rm -r $(TARGET) $(OBJS) $(OBJDIR)
-
-$(TARGET): $(OBJS)
-	@$(LD) -o $@ $^ $(LDFLAGS)
-
-$(OBJS): $(OBJDIR)/%$(OBJEXT) : $(SRCDIR)/%$(SRCEXT) | $(OBJDIR)
-	@$(CC) -c -o $@ $? $(CFLAGS)
-
-$(OBJDIR):
-	@mkdir -p $(OBJDIR)
+	rm -f $(EXE) $(OBJS)

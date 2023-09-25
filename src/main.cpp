@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 
-#include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <pthread.h>
 
@@ -14,6 +14,13 @@
 #include <gst/app/gstappsrc.h>
 
 #include "gst/gstbuffer.h"
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+
+#include <GLFW/glfw3.h>
+
 #include "parse_spec.h"
 
 static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
@@ -63,7 +70,7 @@ bus_call (GstBus     *bus,
         break;
     }
     default:
-        printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
+      //printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
         break;
     }
 
@@ -97,7 +104,7 @@ playback_run(void* thread_data)
     char caps_args[1024];
     sprintf(caps_args, "video/x-raw,format=%s,height=%d,width=%d,framerate=30/1", info->format, info->height, info->width);
     printf("Caps: %s\n", caps_args);
-    g_object_set(gst_bin_get_by_name(GST_BIN(pipeline), "appsrc"), "caps", gst_caps_from_string(caps_args));
+    g_object_set(gst_bin_get_by_name(GST_BIN(pipeline), "appsrc"), "caps", gst_caps_from_string(caps_args), NULL);
 
     gst_element_set_state (pipeline, GST_STATE_PLAYING);
     
@@ -122,10 +129,42 @@ clip_t find_next(clip_t** sequences, clip_t clip)
     return next;
 }
 
+
+static void glfw_error_callback (int error, const char *description)
+{
+  g_print ("GLFW Error %d: %s\n", error, description);
+}
+
+
 int
 main_player(char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
 {
     srand(time(NULL));
+
+     glfwSetErrorCallback (glfw_error_callback);
+     if (!glfwInit ())
+       return 1;
+
+     const char *glsl_version = "#version 130";
+     glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 3);
+     glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 0);
+
+     GLFWwindow *window =
+       glfwCreateWindow (1280, 720, "Dear ImGui GLFW++OpenGL3+Gstreamer example",
+                         NULL,
+                         NULL);
+     if (window == NULL)
+       return 1;
+     glfwMakeContextCurrent (window);
+     glfwSwapInterval (1);         // Enable vsync
+     
+     IMGUI_CHECKVERSION ();
+     ImGui::CreateContext ();
+     ImGui::StyleColorsDark ();
+
+     ImGui_ImplGlfw_InitForOpenGL (window, true);
+     ImGui_ImplOpenGL3_Init (glsl_version);
+
         
     GstElement *pipeline;
     const char* pipe_args_fmt =
@@ -178,7 +217,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
     const gchar * format_local = gst_structure_get_string(structure, "format");
     
     size_t len = strlen(format_local);
-    char* format = malloc((len + 1) * sizeof(gchar));
+    char* format = (char*) malloc((len + 1) * sizeof(gchar));
     memcpy(format, format_local, (len+1) * sizeof(gchar));
     
     gst_sample_unref(sample);
