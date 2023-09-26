@@ -70,7 +70,7 @@ bus_call (GstBus     *bus,
         break;
     }
     default:
-      //printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
+        //printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
         break;
     }
 
@@ -132,7 +132,7 @@ clip_t find_next(clip_t** sequences, clip_t clip)
 
 static void glfw_error_callback (int error, const char *description)
 {
-  g_print ("GLFW Error %d: %s\n", error, description);
+    g_print ("GLFW Error %d: %s\n", error, description);
 }
 
 
@@ -141,31 +141,30 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
 {
     srand(time(NULL));
 
-     glfwSetErrorCallback (glfw_error_callback);
-     if (!glfwInit ())
-       return 1;
+    glfwSetErrorCallback (glfw_error_callback);
+    if (!glfwInit ())
+        return 1;
 
-     const char *glsl_version = "#version 130";
-     glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 3);
-     glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 0);
+    const char *glsl_version = "#version 130";
+    glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 0);
 
-     GLFWwindow *window =
-       glfwCreateWindow (1280, 720, "Dear ImGui GLFW++OpenGL3+Gstreamer example",
-                         NULL,
-                         NULL);
-     if (window == NULL)
-       return 1;
-     glfwMakeContextCurrent (window);
-     glfwSwapInterval (1);         // Enable vsync
+    GLFWwindow *window =
+        glfwCreateWindow (1280, 720, "Dear ImGui GLFW++OpenGL3+Gstreamer example",
+                          NULL,
+                          NULL);
+    if (window == NULL)
+        return 1;
+    glfwMakeContextCurrent (window);
+    glfwSwapInterval (1);         // Enable vsync
      
-     IMGUI_CHECKVERSION ();
-     ImGui::CreateContext ();
-     ImGui::StyleColorsDark ();
+    IMGUI_CHECKVERSION ();
+    ImGui::CreateContext ();
+    ImGui::StyleColorsDark ();
 
-     ImGui_ImplGlfw_InitForOpenGL (window, true);
-     ImGui_ImplOpenGL3_Init (glsl_version);
-
-        
+    ImGui_ImplGlfw_InitForOpenGL (window, true);
+    ImGui_ImplOpenGL3_Init (glsl_version);
+     
     GstElement *pipeline;
     const char* pipe_args_fmt =
         "filesrc location=%s name=filesrc"
@@ -222,15 +221,6 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
     
     gst_sample_unref(sample);
     printf ("video resolution is %dx%d\n", width, height);
-
-    playback_info info;
-    info.width = width;
-    info.height = height;
-    info.format = format;
-    info.appsrc = NULL;
-    pthread_create(&info.tid, NULL, playback_run, &info);
-
-    while (info.appsrc == NULL) usleep(50);
     
     struct timeval t1, t2;
     double elapsedTime;
@@ -245,23 +235,67 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
     gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET  ,
                       frame_time * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+
+
+    GLuint videotex;
+    glGenTextures (1, &videotex);
+    glBindTexture (GL_TEXTURE_2D, videotex);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     
     int frame = start;
-    while (1) {
+    while (!glfwWindowShouldClose(window)) {
         t1 = t2;
         GstSample *sample_frame = gst_app_sink_pull_sample(appsink);
-        if (sample_frame == NULL) {
-            continue;
+        GstBuffer *buffer = nullptr;
+        if (sample_frame) {
+            buffer = gst_sample_get_buffer(sample_frame);
         }
-        GstBuffer *buffer = gst_sample_get_buffer(sample_frame);
-        if (buffer == NULL) {
-            continue;
-        }
-
-        push_to_src(info.appsrc, buffer);
-
-        gst_sample_unref(sample_frame);
         
+        if (buffer) {
+            GstMapInfo map;
+
+            gst_buffer_map (buffer, &map, GST_MAP_READ);
+  
+            glBindTexture (GL_TEXTURE_2D, videotex);
+            glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                          GL_UNSIGNED_BYTE, map.data);
+
+            gst_buffer_unmap (buffer, &map);
+        }
+        
+        if (sample) {
+            gst_sample_unref(sample_frame);
+        }
+
+        ImGui_ImplOpenGL3_NewFrame ();
+        ImGui_ImplGlfw_NewFrame ();
+        ImGui::NewFrame ();
+
+        ImGui::GetBackgroundDrawList ()->AddImage ( //
+                                                    (void *) (guintptr) videotex,   //
+                                                    ImVec2 (0, 0),          //
+                                                    ImVec2 (width, height),     //
+                                                    ImVec2 (0, 0),          //
+                                                    ImVec2 (1, 1)
+                                                    );
+
+        ImGui::Render ();
+
+        int display_w, display_h;
+        glfwMakeContextCurrent (window);
+        glfwGetFramebufferSize (window, &display_w, &display_h);
+        glViewport (0, 0, display_w, display_h);
+
+        ImVec4 clear_color = ImVec4 (0.45f, 0.55f, 0.60f, 1.00f);
+        glClearColor (clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+        glClear (GL_COLOR_BUFFER_BIT);
+
+        ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
+
+        glfwMakeContextCurrent (window);
+        glfwSwapBuffers (window);
+    
         gettimeofday(&t2, NULL);
         elapsedTime = (t2.tv_sec - t1.tv_sec);
         elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000000.0;   // us to ms
@@ -283,9 +317,6 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
             /* char str[100]; */
             /* scanf("%s", str); */
         }
-
-        
-        
     }
 
     g_source_remove (bus_watch_id);
