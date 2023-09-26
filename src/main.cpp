@@ -149,22 +149,6 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
     glfwWindowHint (GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint (GLFW_CONTEXT_VERSION_MINOR, 0);
 
-    GLFWwindow *window =
-        glfwCreateWindow (1280, 720, "Dear ImGui GLFW++OpenGL3+Gstreamer example",
-                          NULL,
-                          NULL);
-    if (window == NULL)
-        return 1;
-    glfwMakeContextCurrent (window);
-    glfwSwapInterval (1);         // Enable vsync
-     
-    IMGUI_CHECKVERSION ();
-    ImGui::CreateContext ();
-    ImGui::StyleColorsDark ();
-
-    ImGui_ImplGlfw_InitForOpenGL (window, true);
-    ImGui_ImplOpenGL3_Init (glsl_version);
-     
     GstElement *pipeline;
     const char* pipe_args_fmt =
         "filesrc location=%s name=filesrc"
@@ -237,6 +221,21 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
 
+    GLFWwindow *window = glfwCreateWindow (width, height, "RRVP - Rapid Response Video Player", NULL, NULL);
+    if (window == NULL)
+        return 1;
+    
+    glfwMakeContextCurrent (window);
+    glfwSwapInterval (1);         // Enable vsync
+     
+    IMGUI_CHECKVERSION ();
+    ImGui::CreateContext ();
+    ImGui::StyleColorsDark ();
+
+    ImGui_ImplGlfw_InitForOpenGL (window, true);
+    ImGui_ImplOpenGL3_Init (glsl_version);
+     
+
     GLuint videotex;
     glGenTextures (1, &videotex);
     glBindTexture (GL_TEXTURE_2D, videotex);
@@ -287,7 +286,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
         glfwGetFramebufferSize (window, &display_w, &display_h);
         glViewport (0, 0, display_w, display_h);
 
-        ImVec4 clear_color = ImVec4 (0.45f, 0.55f, 0.60f, 1.00f);
+        ImVec4 clear_color = ImVec4 (0, 0, 0, 1);
         glClearColor (clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear (GL_COLOR_BUFFER_BIT);
 
