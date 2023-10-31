@@ -25,14 +25,12 @@
 #include "parse_spec.h"
 #include "implot.h"
 
+#define _TS_BUFFER_SIZE 2000
+
 static gboolean
-bus_call (GstBus     *bus,
-          GstMessage *msg,
-          gpointer    data)
+bus_call (GstBus     *bus, GstMessage *msg, gpointer    data)
 {
-
     switch (GST_MESSAGE_TYPE (msg)) {
-
     case GST_MESSAGE_EOS:
         g_print ("End of stream\n");
         break;
@@ -56,44 +54,6 @@ bus_call (GstBus     *bus,
     return TRUE;
 }
 
-typedef struct {
-    pthread_t tid;
-    int width;
-    int height;
-    char* format;
-    GstElement* appsrc;
-} playback_info;
-
-
-void*
-playback_run(void* thread_data)
-{
-
-    playback_info* info = (playback_info*) thread_data;
-    GMainLoop* loop = g_main_loop_new (NULL, FALSE);
-
-    const char* pipe_args =
-        "appsrc name=appsrc"
-        " ! videoconvert ! autovideosink";
-
-    GstElement* pipeline = gst_parse_launch(pipe_args, NULL);
-    GstElement* appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "appsrc");
-    info->appsrc = appsrc;
-
-    char caps_args[1024];
-    sprintf(caps_args, "video/x-raw,format=%s,height=%d,width=%d,framerate=30/1", info->format, info->height, info->width);
-    printf("Caps: %s\n", caps_args);
-    g_object_set(gst_bin_get_by_name(GST_BIN(pipeline), "appsrc"), "caps", gst_caps_from_string(caps_args), NULL);
-
-    gst_element_set_state (pipeline, GST_STATE_PLAYING);
-
-    g_main_loop_run (loop);
-    gst_element_set_state (pipeline, GST_STATE_NULL);
-    gst_object_unref (GST_OBJECT (pipeline));
-    g_main_loop_unref (loop);
-    return NULL;
-
-}
 
 clip_t find_next(clip_t** sequences, clip_t clip)
 {
@@ -114,14 +74,8 @@ static void glfw_error_callback (int error, const char *description)
     g_print ("GLFW Error %d: %s\n", error, description);
 }
 
-static void glfw_keyboard_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
-{
-    ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
-}
 
-
-int
-main_player(char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
+int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
 {
     srand(time(NULL));
 
@@ -196,7 +150,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
 
 
     double frame_time = ((double) start - 1) / 30;
-    gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET  ,
+    gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
                       frame_time * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
@@ -215,12 +169,12 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    
+
     ImGui_ImplGlfw_InitForOpenGL (window, true);
     ImGui_ImplOpenGL3_Init (glsl_version);
 
     glfwSetKeyCallback(window, ImGui_ImplGlfw_KeyCallback);
-    
+
 
     GLuint videotex;
     glGenTextures (1, &videotex);
@@ -232,8 +186,6 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
 
     int show_debug = 1;
 
-
-#define _TS_BUFFER_SIZE 2000
     double ts_begin[_TS_BUFFER_SIZE * 2] = {};
     double fts_begin[_TS_BUFFER_SIZE * 2] = {};
 
@@ -263,13 +215,9 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
 
         if (buffer) {
             GstMapInfo map;
-
             gst_buffer_map (buffer, &map, GST_MAP_READ);
-
             glBindTexture (GL_TEXTURE_2D, videotex);
-            glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-                          GL_UNSIGNED_BYTE, map.data);
-
+            glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, map.data);
             gst_buffer_unmap (buffer, &map);
         }
 
@@ -281,25 +229,22 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
         ImGui_ImplGlfw_NewFrame ();
         ImGui::NewFrame ();
 
-        ImGui::GetBackgroundDrawList ()->AddImage (
-                                                    (void *) (guintptr) videotex,
-                                                    ImVec2 (0, 0),
-                                                    ImVec2 (width, height),
-                                                    ImVec2 (0, 0),
-                                                    ImVec2 (1, 1)
-                                                    );
+        ImGui::GetBackgroundDrawList()->AddImage((void *) (guintptr) videotex, ImVec2 (0, 0),
+                                                 ImVec2 (width, height), ImVec2 (0, 0), ImVec2 (1, 1));
 
         if (show_debug && i > 2) {
             ImGui::SetNextWindowPos({ 0, 0 });
             float nwidth = (float)width / 2;
             float nheight = (float) height / 4;
             ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
-            ImGui::Begin("Graph", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
-                
+            ImGui::Begin("Graph", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
+                         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
+                         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
+
             int fv = std::min(i - 1, _TS_BUFFER_SIZE);
 
             double xs[_TS_BUFFER_SIZE];
-            
+
             for (int j = 0; j < fv; j++) {
                 xs[j] = ts[j] - totalTime;
             }
@@ -312,7 +257,7 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
             ImGui::End();
         }
 
-        ImGui::Render ();
+        ImGui::Render();
 
         int display_w, display_h;
         glfwMakeContextCurrent (window);
@@ -358,34 +303,36 @@ main_player(char* movie, int flip_method, clip_t** sequences, int (*start_addres
             start = cclip.start;
             frame = start;
             frame_time = ((double) frame - 1)  / 30;
-            if (!gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET  ,
+            if (!gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET,
                                    frame_time * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
-            //gst_element_set_state(pipeline, GST_STATE_PLAYING);
             printf("Seeking frame %d => %f \n", start, frame_time);
             end = cclip.end;
-            /* char str[100]; */
-            /* scanf("%s", str); */
         }
-
 
         if (ImGui::IsKeyPressed(ImGuiKey_A)) {
             show_debug = !show_debug;
         }
-        
 
-
-
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+            break;
+        }
     }
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+
+    ImPlot::DestroyContext();
+    ImGui::DestroyContext();
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     g_source_remove (bus_watch_id);
     free(format);
     return 0;
 }
-
-
 
 char* movie = "./vid/vid.mp4";
 char* spec = "./vid/spec.txt";
@@ -423,7 +370,7 @@ int main(int argc, char **argv)
 
     int start[2];
     clip_t** sequences = parse_spec(spec, &start);
-    /* init GStreamer */
+
     gst_init (&argc, &argv);
     main_player(movie, flip, sequences, &start);
     return 0;
