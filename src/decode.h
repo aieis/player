@@ -11,6 +11,7 @@
 
 #include "readerwriterqueue.h"
 #include "parse_spec.h"
+#include "pipeline.h"
 
 struct frame_t {
     uint8_t* data;
@@ -37,7 +38,7 @@ typedef std::function<void(DecoderData)> decdata_f;
 class Decoder
 {
     guint bus_watch_id;
-    GstElement *pipeline;
+    Pipeline pipeline;
 
     decdata_f submit_data;
     
@@ -45,6 +46,7 @@ class Decoder
     addr_t start_address;
     int width;
     int height;
+    double framerate;
     std::string format;
 
     bool running;
@@ -66,4 +68,6 @@ class Decoder
     int get_height() {return height;};
 
     bool pop(frame_t &frame);
+
+    void query();
 };

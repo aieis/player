@@ -1,5 +1,9 @@
 #include "decode.h"
+#include "gst/app/gstappsink.h"
 #include "gst/gstbuffer.h"
+#include "gst/gstclock.h"
+#include "gst/gstelement.h"
+#include "gst/gstsegment.h"
 
 #include <chrono>
 #include <cstdint>
@@ -11,6 +15,7 @@
 
 clip_t find_next(clip_t** sequences, clip_t clip)
 {
+    printf("%d %d %d\n", clip.address[0], clip.address[1], clip.njumps);
     int jind = rand() % clip.njumps;
     int addr[2];
     addr[0] = clip.addresses[jind * 2];
@@ -63,56 +68,24 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     qmax = q_size;
     frames = moodycamel::BlockingReaderWriterQueue<frame_t>(qmax);
 
-    const char* pipe_args_fmt =
-        "filesrc location=%s name=filesrc"
-        " ! decodebin"
-        " ! videoflip video-direction=%d"
-        " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! queue ! appsink name=sink sync=false max-buffers=%lu";
-
-    char pipe_args[2048];
-    sprintf(pipe_args, pipe_args_fmt, movie.c_str(), flip_method, q_size);
-
-    pipeline = gst_parse_launch(pipe_args, NULL);
-    GstBus* bus = gst_element_get_bus(pipeline);
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
-
-    bus_watch_id = gst_bus_add_watch (bus, bus_call, NULL);
-    gst_object_unref(bus);
+    create_pipeline(&pipeline);
+    check_pipeline_for_message(&pipeline);
 }
 
 Decoder::~Decoder()
 {
     g_source_remove (bus_watch_id);
-    if (pipeline != NULL) {
-        gst_object_unref(pipeline);
-    }
+    cleanup_pipeline(&pipeline);
 }
 
 bool Decoder::init()
 {
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
-    if (!sink) {
-        printf("sink is NULL\n");
-        return false;
-    }
+    printf("Pull a sample!\n");
+    GstSample *sample = NULL;
 
-    GstElement *src = gst_bin_get_by_name(GST_BIN(pipeline), "filesrc");
-    if (!src) {
-        printf("Src is NULL\n");
-        return false;
-    }
-
-    GstAppSink* appsink = GST_APP_SINK(sink);
-    if (!appsink) {
-        printf("appsink is NULL\n");
-        return false;
-    }
-
-
-    GstSample *sample = gst_app_sink_pull_sample(appsink);
-    if (!sample) {
+    while (!sample) {
         printf("sample is NULL\n");
-        return false;
+        sample = gst_app_sink_try_pull_sample(GST_APP_SINK(pipeline.appsink), 10 * GST_MSECOND);
     }
 
     GstCaps* caps = gst_sample_get_caps(sample);
@@ -121,33 +94,35 @@ bool Decoder::init()
     gst_structure_get_int(structure, "width", &width);
     gst_structure_get_int(structure, "height", &height);
 
+    gint fnum;
+    gint den;
+
+    gst_structure_get_fraction(structure, "framerate", &fnum, &den);
+
+    framerate = (double)fnum / den;
+    
     const gchar * format_local = gst_structure_get_string(structure, "format");
     format = std::string(format_local);
     gst_sample_unref(sample);
+
+    printf("Video Properties: %dx%d %f FPS %s\n", width, height, framerate, format.c_str());
     return true;
 }
 
 void Decoder::play()
 {
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
-    if (!sink) {
-        printf("sink is NULL\n");
-        return;
-    }
+    pipeline.pipeState = GST_STATE_PLAYING;
+    update_pipeline_state(&pipeline);
 
-    GstAppSink* appsink = GST_APP_SINK(sink);
-    if (!appsink) {
-        printf("appsink is NULL\n");
-        return;
-    }
+    GstAppSink* appsink = GST_APP_SINK(pipeline.appsink);
 
     clip_t cclip = get_clip(sequences, start_address);
     int start = cclip.start;
     int end = cclip.end;
     int frame = start;
 
-    double frame_time = ((double) start - 1) / 30;
-    gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
+    double frame_time = ((double) start - 1) / framerate;
+    gst_element_seek (pipeline.videosrc, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_NONE, GST_SEEK_TYPE_SET,
                       frame_time * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
@@ -164,9 +139,12 @@ void Decoder::play()
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
 
     while (running) {
+        bool eos = gst_app_sink_is_eos(appsink);
+        printf("Is EOS: %d\n", eos);
         GstSample *sample_frame = gst_app_sink_pull_sample(appsink);
 
         if (!sample_frame) {
+            printf("NULL Sample!\n");
             continue;
         }
 
@@ -193,13 +171,15 @@ void Decoder::play()
             cclip = find_next(sequences, cclip);
             start = cclip.start;
             frame = start;
-            frame_time = ((double) frame - 1)  / 30;
-            if (!gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+            frame_time = ((double) frame - 1)  / framerate;
+
+            printf("Seeking frame %d => %f \n", start, frame_time);
+            if (!gst_element_seek (pipeline.videosrc, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
                                    frame_time * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
-            printf("Seeking frame %d => %f \n", start, frame_time);
+            printf("Seek successful!\n");
             end = cclip.end;
         }
 
@@ -213,16 +193,26 @@ void Decoder::play()
         double qsize = frames.size_approx();
         
         submit_data({totalTime, elapsedTime, qsize});
+
+        pipeline.pipeState = GST_STATE_PLAYING;
+        update_pipeline_state(&pipeline);
+        check_pipeline_for_message(&pipeline);
     }
 }
 
 void Decoder::stop()
 {
     running = false;
-    gst_element_set_state (pipeline, GST_STATE_NULL);
+    pipeline.pipeState = GST_STATE_NULL;
+    update_pipeline_state(&pipeline);
 }
 
 bool Decoder::pop(frame_t &frame)
 {
     return frames.try_dequeue(frame);
+}
+
+void Decoder::query()
+{
+    check_pipeline_for_message(&pipeline);
 }

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <bits/chrono.h>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -37,7 +38,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
     Graph ft_graph {2000, 0.01, 0.05};
     Graph fps_graph {2000, 0.01, 0.05};
-    Graph qlen_graph {2000, 0, 15};
+    Graph qlen_graph {2000, 0, 40};
     
     decdata_f ftdata = [&](DecoderData p) {
         ft_graph.add(p.tt, p.decode_time);
@@ -45,7 +46,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     };
 
     std::shared_ptr<Decoder> decoder;
-    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 10, ftdata));
+    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 30, ftdata));
     decoder->init();
     
     int width = decoder->get_width();
@@ -147,7 +148,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
         t2 = std::chrono::steady_clock::now();
         
-        elapsed_time = (t2 - t1).count();
+        elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
 
         auto end = t1 + std::chrono::milliseconds(33);
 
@@ -164,6 +165,8 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
         }
 
         std::this_thread::sleep_until(end);
+
+        decoder->query();
     }
 
     ImGui_ImplOpenGL3_Shutdown();
