@@ -31,7 +31,7 @@ void trim(char * s) {
 int char_index(char* str, char c)
 {
     size_t len = strlen(str);
-    for (int i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         if (str[i] == c) {
             return i;
         }

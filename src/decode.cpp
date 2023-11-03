@@ -1,6 +1,15 @@
 #include "decode.h"
+#include "gst/app/gstappsink.h"
+#include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
+#include "gst/gstelement.h"
+#include "gst/gstelementfactory.h"
+#include "gst/gstformat.h"
+#include "gst/gstpad.h"
+#include "gst/gststructure.h"
+#include "gst/gstutils.h"
 
+#include <bits/chrono.h>
 #include <chrono>
 #include <cstdint>
 #include <stdio.h>
@@ -42,13 +51,58 @@ bus_call (GstBus     *bus, GstMessage *msg, gpointer    data)
         break;
     }
     default:
-        //printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
+        printf("%sn\n", GST_MESSAGE_TYPE_NAME(msg));
         break;
     }
 
     return TRUE;
 }
+static void pad_added_handler(GstElement *src, GstPad *new_pad, pipe_t *data)
+{
+  GstPad *sink_pad = gst_element_get_static_pad(data->conv, "sink");
+  GstPadLinkReturn ret;
+  GstCaps *new_pad_caps = NULL;
+  GstStructure *new_pad_struct = NULL;
+  const gchar *new_pad_type = NULL;
 
+  g_print("Received new pad '%s' from '%s':\n", GST_PAD_NAME(new_pad), GST_ELEMENT_NAME(src));
+
+  /* If our converter is already linked, we have nothing to do here */
+  if (gst_pad_is_linked(sink_pad))
+  {
+    g_print("  We are already linked. Ignoring.\n");
+    goto exit;
+  }
+
+  /* Check the new pad's type */
+  new_pad_caps = gst_pad_get_current_caps(new_pad);
+  new_pad_struct = gst_caps_get_structure(new_pad_caps, 0);
+  new_pad_type = gst_structure_get_name(new_pad_struct);
+  if (!g_str_has_prefix(new_pad_type, "video/x-raw"))
+  {
+    g_print("  It has type '%s' which is not raw video. Ignoring.\n", new_pad_type);
+    goto exit;
+  }
+
+  /* Attempt the link */
+  ret = gst_pad_link(new_pad, sink_pad);
+  if (GST_PAD_LINK_FAILED(ret))
+  {
+    g_print("  Type is '%s' but link failed.\n", new_pad_type);
+  }
+  else
+  {
+    g_print("  Link succeeded (type '%s').\n", new_pad_type);
+  }
+
+exit:
+  /* Unreference the new pad's caps, if we got them */
+  if (new_pad_caps != NULL)
+    gst_caps_unref(new_pad_caps);
+
+  /* Unreference the sink pad */
+  gst_object_unref(sink_pad);
+}
 Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t i_start_address, size_t q_size, decdata_f i_submit_data)
 {
     width = 0;
@@ -63,56 +117,66 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     qmax = q_size;
     frames = moodycamel::BlockingReaderWriterQueue<frame_t>(qmax);
 
-    const char* pipe_args_fmt =
-        "filesrc location=%s name=filesrc"
-        " ! decodebin"
-        " ! videoflip video-direction=%d"
-        " ! videoconvert ! video/x-raw,format=RGBA ! videoconvert ! queue ! appsink name=sink sync=false max-buffers=%lu";
 
-    char pipe_args[2048];
-    sprintf(pipe_args, pipe_args_fmt, movie.c_str(), flip_method, q_size);
+    pipe.src = gst_element_factory_make("filesrc", "source0");
+    pipe.dec = gst_element_factory_make("decodebin", "decoder0");
+    pipe.conv = gst_element_factory_make("videoconvert", "conv0");
+    pipe.sink = gst_element_factory_make("appsink", "sink0");
 
-    pipeline = gst_parse_launch(pipe_args, NULL);
-    GstBus* bus = gst_element_get_bus(pipeline);
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    pipe.pipeline = gst_pipeline_new ("decoder-pipe");
+
+    if (!pipe.pipeline || !pipe.src || !pipe.dec || !pipe.conv || !pipe.sink) {
+        printf("Not all elements could be created.\n");
+        return;
+    }
+
+    g_object_set(pipe.src, "location", movie.c_str(), NULL);
+
+    gst_app_sink_set_max_buffers(GST_APP_SINK(pipe.sink), 20);
+    gst_base_sink_set_sync(GST_BASE_SINK(pipe.sink), false);
+
+    gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.dec, pipe.conv, pipe.sink, NULL);
+    g_signal_connect(pipe.dec, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
+
+    
+    gboolean link = gst_element_link(pipe.src, pipe.dec);
+    g_assert(link);
+    
+    GstCaps* caps = gst_caps_new_simple ("video/x-raw", "format", G_TYPE_STRING, "RGBA", NULL);
+    link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
+    g_assert(link);
+    
+    gst_object_unref(caps);
+
+    if (!link) {
+        printf("Error when linking pipeline \n");
+    }
+
+
+    gst_element_set_state(pipe.pipeline, GST_STATE_READY);
+    GstBus* bus = gst_element_get_bus(pipe.pipeline);
+
+    gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
 
     bus_watch_id = gst_bus_add_watch (bus, bus_call, NULL);
     gst_object_unref(bus);
+
 }
 
 Decoder::~Decoder()
 {
     g_source_remove (bus_watch_id);
-    if (pipeline != NULL) {
-        gst_object_unref(pipeline);
+    if (pipe.pipeline != NULL) {
+        gst_object_unref(pipe.pipeline);
     }
 }
 
 bool Decoder::init()
 {
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
-    if (!sink) {
-        printf("sink is NULL\n");
-        return false;
-    }
-
-    GstElement *src = gst_bin_get_by_name(GST_BIN(pipeline), "filesrc");
-    if (!src) {
-        printf("Src is NULL\n");
-        return false;
-    }
-
-    GstAppSink* appsink = GST_APP_SINK(sink);
-    if (!appsink) {
-        printf("appsink is NULL\n");
-        return false;
-    }
-
-
-    GstSample *sample = gst_app_sink_pull_sample(appsink);
-    if (!sample) {
+    GstSample *sample = NULL;
+    while (!sample) {
         printf("sample is NULL\n");
-        return false;
+        sample = gst_app_sink_pull_sample(GST_APP_SINK(pipe.sink));
     }
 
     GstCaps* caps = gst_sample_get_caps(sample);
@@ -121,50 +185,43 @@ bool Decoder::init()
     gst_structure_get_int(structure, "width", &width);
     gst_structure_get_int(structure, "height", &height);
 
+    int numer;
+    int denom;
+
+    gst_structure_get_fraction(structure, "framerate", &numer, &denom);
+    framerate = (double)numer/denom;
+
     const gchar * format_local = gst_structure_get_string(structure, "format");
     format = std::string(format_local);
     gst_sample_unref(sample);
+
+    printf("Video properties: %dx%d %f FPS %s\n", width, height, framerate, format.c_str());
     return true;
 }
 
 void Decoder::play()
 {
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
-    if (!sink) {
-        printf("sink is NULL\n");
-        return;
-    }
-
-    GstAppSink* appsink = GST_APP_SINK(sink);
-    if (!appsink) {
-        printf("appsink is NULL\n");
-        return;
-    }
-
     clip_t cclip = get_clip(sequences, start_address);
     int start = cclip.start;
     int end = cclip.end;
     int frame = start;
 
-    double frame_time = ((double) start - 1) / 30;
-    gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
+    double frame_time = ((double) start - 1) / framerate;
+    gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
                       frame_time * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
     running = true;
 
-    double totalTime = 0;
-    struct timeval begin_time, t1, t2;
-    double elapsedTime;
-    gettimeofday(&begin_time, NULL);
-
-    t2 = begin_time;
-    t1 = begin_time;
-
+    double total_time = 0;
+    auto t1 = std::chrono::steady_clock::now();
+    auto t2 = t1;
+    double elapsed_time;
+    
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
 
     while (running) {
-        GstSample *sample_frame = gst_app_sink_pull_sample(appsink);
+        GstSample *sample_frame = gst_app_sink_pull_sample(GST_APP_SINK(pipe.sink));
 
         if (!sample_frame) {
             continue;
@@ -182,7 +239,7 @@ void Decoder::play()
             while (frames.size_approx() > qmax) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(3));
             }
-            
+
             frames.enqueue(frame);
         }
 
@@ -193,9 +250,9 @@ void Decoder::play()
             cclip = find_next(sequences, cclip);
             start = cclip.start;
             frame = start;
-            frame_time = ((double) frame - 1)  / 30;
-            if (!gst_element_seek (pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
-                                   frame_time * GST_SECOND,
+            frame_time = ((double) frame - 1)  / framerate;
+            if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_BUFFERS, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+                                   frame,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
@@ -203,23 +260,22 @@ void Decoder::play()
             end = cclip.end;
         }
 
-        
-        gettimeofday(&t2, NULL);
-        elapsedTime = (t2.tv_sec - t1.tv_sec);
-        elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000000.0;
+
+        t2 = std::chrono::steady_clock::now();
+        elapsed_time = (double) std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
         t1 = t2;
-        totalTime += elapsedTime;
+        total_time += elapsed_time;
 
         double qsize = frames.size_approx();
-        
-        submit_data({totalTime, elapsedTime, qsize});
+
+        submit_data({total_time, elapsed_time, qsize});
     }
 }
 
 void Decoder::stop()
 {
     running = false;
-    gst_element_set_state (pipeline, GST_STATE_NULL);
+    gst_element_set_state (pipe.pipeline, GST_STATE_NULL);
 }
 
 bool Decoder::pop(frame_t &frame)

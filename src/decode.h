@@ -26,6 +26,16 @@ struct frame_t {
 
 inline void frame_free(frame_t frame) { free(frame.data);}
 
+struct pipe_t {
+    GstElement* pipeline;
+    GstElement* src;
+    GstElement* dec;
+    GstElement* flip;
+    GstElement* conv;
+    GstElement* scale;
+    GstElement* sink;
+};
+
 struct DecoderData {
     double tt;
     double decode_time;
@@ -37,7 +47,7 @@ typedef std::function<void(DecoderData)> decdata_f;
 class Decoder
 {
     guint bus_watch_id;
-    GstElement *pipeline;
+    pipe_t pipe;
 
     decdata_f submit_data;
     
@@ -45,6 +55,7 @@ class Decoder
     addr_t start_address;
     int width;
     int height;
+    double framerate;
     std::string format;
 
     bool running;

@@ -36,9 +36,9 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     srand(time(NULL));
 
     Graph ft_graph {2000, 0.01, 0.05};
-    Graph fps_graph {2000, 0.01, 0.05};
+    Graph fps_graph {2000, 0, 60};
     Graph qlen_graph {2000, 0, 15};
-    
+
     decdata_f ftdata = [&](DecoderData p) {
         ft_graph.add(p.tt, p.decode_time);
         qlen_graph.add(p.tt, p.queue_size);
@@ -47,7 +47,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     std::shared_ptr<Decoder> decoder;
     decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 10, ftdata));
     decoder->init();
-    
+
     int width = decoder->get_width();
     int height = decoder->get_height();
 
@@ -97,6 +97,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     auto t1 = std::chrono::steady_clock::now();
     auto t2 = t1;
     double elapsed_time;
+    auto end = t1 + std::chrono::milliseconds(33);
     
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -104,10 +105,29 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
         ImGui_ImplGlfw_NewFrame ();
         ImGui::NewFrame ();
 
+
+        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+            show_debug = !show_debug;
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+            break;
+        }
+
+        t2 = std::chrono::steady_clock::now();
+
         frame_t frame;
-        if (decoder->pop(frame)) {
+        if (t2 >= end && decoder->pop(frame)) {
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
             frame_free(frame);
+            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
+
+            t1 = t2;
+            end = t1 + std::chrono::milliseconds(33);
+
+            total_time += elapsed_time;
+            fps_graph.add(total_time, 1.0 / elapsed_time);
+
         }
 
         ImGui::GetBackgroundDrawList()->AddImage((void *) (guintptr) videotex, ImVec2 (0, 0),
@@ -122,10 +142,10 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
                          | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
                          | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
 
-            ft_graph.draw("frame_decode_time (ms)", nwidth, nheight / 3);
-            fps_graph.draw("frame_display_time (ms)", nwidth, nheight / 3);
+            ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
+            fps_graph.draw("FPS", nwidth, nheight / 3);
             qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
-            
+
             ImGui::End();
         }
 
@@ -145,25 +165,6 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
         glfwMakeContextCurrent (window);
         glfwSwapBuffers (window);
 
-        t2 = std::chrono::steady_clock::now();
-        
-        elapsed_time = (t2 - t1).count();
-
-        auto end = t1 + std::chrono::milliseconds(33);
-
-        t1 = t2;
-        total_time += elapsed_time;
-        fps_graph.add(total_time, elapsed_time);
-
-        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
-            show_debug = !show_debug;
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
-            break;
-        }
-
-        std::this_thread::sleep_until(end);
     }
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -176,8 +177,17 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     glfwTerminate();
 
     decoder->stop();
+
+    frame_t frame;
+    while (decoder->pop(frame))
+        frame_free(frame);
+
     decoder_thread.join();
-    
+
+    while (decoder->pop(frame))
+        frame_free(frame);
+
+
     return 0;
 }
 
