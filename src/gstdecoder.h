@@ -10,21 +10,9 @@
 #include <gst/gstbuffer.h>
 
 #include "readerwriterqueue.h"
+
+#include "decoder.h"
 #include "parse_spec.h"
-
-struct frame_t {
-    uint8_t* data;
-
-    frame_t(const frame_t &frame) {
-        data = frame.data;
-    }
-
-    frame_t() {
-        data = nullptr;
-    }
-};
-
-inline void frame_free(frame_t frame) { free(frame.data);}
 
 struct pipe_t {
     GstElement* pipeline;
@@ -35,14 +23,6 @@ struct pipe_t {
     GstElement* scale;
     GstElement* sink;
 };
-
-struct DecoderData {
-    double tt;
-    double decode_time;
-    double queue_size;
-};
-
-typedef std::function<void(DecoderData)> decdata_f;
 
 class Decoder
 {

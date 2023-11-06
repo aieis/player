@@ -1,4 +1,5 @@
-#include "decode.h"
+#include "gstdecoder.h"
+
 #include "gst/app/gstappsink.h"
 #include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
@@ -131,10 +132,10 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     }
 
     g_object_set(pipe.src, "location", movie.c_str(), NULL);
-
-    gst_app_sink_set_max_buffers(GST_APP_SINK(pipe.sink), 20);
-    gst_base_sink_set_sync(GST_BASE_SINK(pipe.sink), false);
-
+    g_object_set(pipe.sink, "max-buffers", 2, NULL);
+    g_object_set(pipe.sink, "drop", false, NULL);
+    g_object_set(pipe.sink, "sync", false, NULL);
+    
     gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.dec, pipe.conv, pipe.sink, NULL);
     g_signal_connect(pipe.dec, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
 
@@ -146,8 +147,7 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
     g_assert(link);
     
-    gst_object_unref(caps);
-
+    
     if (!link) {
         printf("Error when linking pipeline \n");
     }
@@ -251,8 +251,8 @@ void Decoder::play()
             start = cclip.start;
             frame = start;
             frame_time = ((double) frame - 1)  / framerate;
-            if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_BUFFERS, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
-                                   frame,
+            if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+                                   frame_time * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }

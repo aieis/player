@@ -22,7 +22,8 @@
 
 #include "parse_spec.h"
 #include "graph.h"
-#include "decode.h"
+#include "gstdecoder.h"
+#include "avdecoder.h"
 
 
 static void glfw_error_callback (int error, const char *description)
@@ -98,7 +99,8 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     auto t2 = t1;
     double elapsed_time;
     auto end = t1 + std::chrono::milliseconds(33);
-    
+
+    bool swapready = false;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         ImGui_ImplOpenGL3_NewFrame ();
@@ -117,19 +119,12 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
         t2 = std::chrono::steady_clock::now();
 
         frame_t frame;
-        if (t2 >= end && decoder->pop(frame)) {
+        if (!swapready && decoder->pop(frame)) {
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
             frame_free(frame);
-            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
-
-            t1 = t2;
-            end = t1 + std::chrono::milliseconds(33);
-
-            total_time += elapsed_time;
-            fps_graph.add(total_time, 1.0 / elapsed_time);
-
+            swapready = true;
         }
-
+            
         ImGui::GetBackgroundDrawList()->AddImage((void *) (guintptr) videotex, ImVec2 (0, 0),
                                                  ImVec2 (width, height), ImVec2 (0, 0), ImVec2 (1, 1));
 
@@ -162,8 +157,17 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
         ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
 
-        glfwMakeContextCurrent (window);
-        glfwSwapBuffers (window);
+        if (t2 >= end && swapready) {            
+            glfwMakeContextCurrent (window);
+            glfwSwapBuffers (window);
+            swapready = false;
+            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
+            t1 = t2;
+            end = t1 + std::chrono::milliseconds(33);
+
+            total_time += elapsed_time;
+            fps_graph.add(total_time, 1.0 / elapsed_time);
+        }
 
     }
 

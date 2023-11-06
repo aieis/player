@@ -6,10 +6,13 @@ GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 
 GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
-GTKLIB =  $(shell pkg-config --libs gtk+-2.0)	
+GTKLIB =  $(shell pkg-config --libs gtk+-2.0)
 
-INCS = $(GLFWINC) $(GLIBINC) $(GSTINC)
-LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB)
+EXINC = $(shell pkg-config --cflags libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
+EXLIB = $(shell pkg-config --libs libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
+
+INCS = $(GLFWINC) $(GLIBINC) $(GSTINC) $(EXINC)
+LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB) $(EXLIB)
 
 CC = gcc
 LD = gcc
@@ -20,11 +23,13 @@ SRCDIR	= src
 OBJDIR	= obj
 TARGET	= rrvp
 
+HEADEXT = .h
 SRCEXT	= .cpp
 OBJEXT	= .o
 
 SRCTREE	= $(shell find $(SRCDIR) -type d)
 SRCS	= $(shell find $(SRCDIR) -type f -name '*$(SRCEXT)')
+HEADERS	= $(shell find $(SRCDIR) -type f -name '*$(HEADEXT)')
 OBJTREE	= $(foreach D,$(SRCTREE),$(shell echo $(D) | sed 's/$(SRCDIR)/$(OBJDIR)/'))
 OBJSTMP	= $(foreach F,$(SRCS),$(shell echo $(F) | sed -e 's/$(SRCDIR)/$(OBJDIR)/'))
 OBJS	= $(foreach O,$(OBJSTMP),$(shell echo $(O) | sed -e 's/\$(SRCEXT)/\$(OBJEXT)/'))
