@@ -51,6 +51,8 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
     int width = decoder->get_width();
     int height = decoder->get_height();
+    double framerate = decoder->get_framerate();
+    double frametime = 1000.0 / framerate;
 
     std::thread decoder_thread ([&] {decoder->play();});
 
@@ -163,7 +165,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
             swapready = false;
             elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
             t1 = t2;
-            end = t1 + std::chrono::milliseconds(33);
+            end = t1 + std::chrono::milliseconds((int)frametime);
 
             total_time += elapsed_time;
             fps_graph.add(total_time, 1.0 / elapsed_time);

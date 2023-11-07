@@ -22,11 +22,13 @@ struct pipe_t {
     GstElement* conv;
     GstElement* scale;
     GstElement* sink;
+
+    GstBus* bus;
+    guint bus_watch_id;
 };
 
 class Decoder
 {
-    guint bus_watch_id;
     pipe_t pipe;
 
     decdata_f submit_data;
@@ -55,6 +57,7 @@ class Decoder
     
     int get_width() {return width;};
     int get_height() {return height;};
+    double get_framerate() {return framerate;};
 
     bool pop(frame_t &frame);
 };
