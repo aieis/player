@@ -230,23 +230,16 @@ void Decoder::play()
     double elapsed_time;
     
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
-    bool paused = false;
-
     while (running) {
+        GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
+        bus_call(pipe.bus, msg, NULL);
+
         GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 33);
-        if (!sample_frame && paused) {
-            gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
-            gst_element_set_state(pipe.sink, GST_STATE_PLAYING);
-            paused = false;
-        }
 
         if (!sample_frame) {
             continue;
         }
         
-        GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
-        bus_call(pipe.bus, msg, NULL);
-
         if (!sample_frame) {
             continue;
         }
@@ -259,13 +252,9 @@ void Decoder::play()
             frame_t frame;
             frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
             memcpy(frame.data, map.data, frame_size);
+            gst_buffer_unmap(buffer, &map);
 
             while (frames.size_approx() > qmax) {
-                if (!paused) {
-                    gst_element_set_state(pipe.pipeline, GST_STATE_PAUSED);
-                    gst_element_set_state(pipe.sink, GST_STATE_PAUSED);
-                    paused = true;
-                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(3));
             }
 
@@ -280,12 +269,6 @@ void Decoder::play()
             start = cclip.start;
             frame = start;
             frame_time = ((double) frame - 1)  / framerate;
-
-            if (paused) {
-                gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);    
-                gst_element_set_state(pipe.sink, GST_STATE_PLAYING);
-                paused = false;
-            }
             
             printf("Seeking frame %d => %f \n", start, frame_time);
 
