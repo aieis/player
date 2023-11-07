@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <string>
 
 struct frame_t {
     uint8_t* data;
@@ -31,5 +32,6 @@ struct DecoderData {
 };
 
 typedef std::function<void(DecoderData)> decdata_f;
+typedef std::function<void(std::string)> addstr_f;
 
 #endif

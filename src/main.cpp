@@ -22,6 +22,8 @@
 
 #include "parse_spec.h"
 #include "graph.h"
+#include "list.h"
+
 #include "gstdecoder.h"
 #include "avdecoder.h"
 
@@ -40,13 +42,19 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     Graph fps_graph {2000, 0, 60};
     Graph qlen_graph {2000, 0, 15};
 
+    ListView msg_hist {10};
+    ListView clip_hist {10};
+
     decdata_f ftdata = [&](DecoderData p) {
         ft_graph.add(p.tt, p.decode_time);
         qlen_graph.add(p.tt, p.queue_size);
     };
 
+    addstr_f msgdata = [&](std::string s) { msg_hist.add(s);};
+    addstr_f clipdata = [&](std::string s) { clip_hist.add(s);};
+
     std::shared_ptr<Decoder> decoder;
-    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 10, ftdata));
+    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 10, ftdata, msgdata, clipdata));
     decoder->init();
 
     int width = decoder->get_width();
@@ -143,6 +151,19 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
             fps_graph.draw("FPS", nwidth, nheight / 3);
             qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
 
+            ImGui::End();
+
+            nwidth = (float)width / 4;
+            nheight = (float) height / 3 * 2;
+            ImGui::SetNextWindowPos({ width - nwidth - 5, 0 });
+            ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
+            
+            ImGui::Begin("History", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
+                         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
+                         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
+
+            msg_hist.draw("Messages", nwidth, nheight / 2);
+            clip_hist.draw("Clip History", nwidth, nheight / 2);
             ImGui::End();
         }
 

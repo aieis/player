@@ -16,7 +16,7 @@ LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB) $(EXLIB)
 
 CC = gcc
 LD = gcc
-CFLAGS= $(INCS) -pedantic -Wall -Os -std=c++23 -g
+CFLAGS= $(INCS) -pedantic -Wall -Os -std=c++2b -g
 LDFLAGS=$(LIBS) -lm -lGL -lstdc++ -g
 
 SRCDIR	= src

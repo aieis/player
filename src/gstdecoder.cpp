@@ -1,5 +1,6 @@
 #include "gstdecoder.h"
 
+#include "decoder.h"
 #include "gst/app/gstappsink.h"
 #include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
@@ -33,18 +34,13 @@ clip_t find_next(clip_t** sequences, clip_t clip)
     return next;
 }
 
-static gboolean
+static std::string
 bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
 {
-    if (msg == NULL) {
-        return TRUE;
-    }
-    
     switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_EOS:
-        g_print ("End of stream\n");
-        break;
-
+        return "End of stream\n";
+        
     case GST_MESSAGE_ERROR: {
         gchar  *debug;
         GError *error;
@@ -52,16 +48,16 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
         gst_message_parse_error (msg, &error, &debug);
         g_free (debug);
 
-        g_printerr ("Error: %s\n", error->message);
+        std::string err(error->message);
         g_error_free (error);
-        break;
+        
+        return "Error: " + err;        
     }
     default:
-        printf("%s\n", GST_MESSAGE_TYPE_NAME(msg));
-        break;
+        return GST_MESSAGE_TYPE_NAME(msg);
     }
-
-    return TRUE;
+    
+    return GST_MESSAGE_TYPE_NAME(msg);
 }
 
 
@@ -113,7 +109,7 @@ exit:
 }
 
 
-Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t i_start_address, size_t q_size, decdata_f i_submit_data)
+Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t i_start_address, size_t q_size, decdata_f i_submit_data, addstr_f i_msg_hist, addstr_f i_clip_hist)
 {
     width = 0;
     height = 0;
@@ -122,6 +118,8 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
 
     sequences = isequences;
     submit_data = i_submit_data;
+    send_msg = i_msg_hist;
+    clip_changed = i_clip_hist;
     start_address = i_start_address;
 
     qmax = q_size;
@@ -232,7 +230,10 @@ void Decoder::play()
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
     while (running) {
         GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
-        bus_call(pipe.bus, msg, NULL);
+        if (msg != NULL) {
+            std::string msgval = bus_call(pipe.bus, msg, NULL);
+            send_msg(msgval);
+        }
 
         GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 33);
 
@@ -279,6 +280,7 @@ void Decoder::play()
             }
             
             printf("Seeking successful %d => %f \n", start, frame_time);
+            clip_changed(std::to_string(cclip.address[0]) + "." + std::to_string(cclip.address[1]));
             
             end = cclip.end;
         }

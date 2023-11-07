@@ -32,6 +32,9 @@ class Decoder
     pipe_t pipe;
 
     decdata_f submit_data;
+    addstr_f send_msg;
+    addstr_f clip_changed;
+    
     
     clip_t** sequences;
     addr_t start_address;
@@ -47,7 +50,7 @@ class Decoder
     
  public:
 
-    Decoder(std::string movie, int flip_mehtod, clip_t** clips, addr_t start_address, size_t q_size, decdata_f submit_data);
+    Decoder(std::string movie, int flip_mehtod, clip_t** clips, addr_t start_address, size_t q_size, decdata_f submit_data, addstr_f msg_hist, addstr_f clip_hist);
     ~Decoder();
     
     bool init();
