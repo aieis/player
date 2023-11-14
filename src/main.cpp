@@ -126,8 +126,6 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
             break;
         }
 
-        t2 = std::chrono::steady_clock::now();
-
         frame_t frame;
         if (!swapready && decoder->pop(frame)) {
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
@@ -180,6 +178,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
         ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
 
+        t2 = std::chrono::steady_clock::now();
         if (t2 >= end && swapready) {            
             glfwMakeContextCurrent (window);
             glfwSwapBuffers (window);

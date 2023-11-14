@@ -2,6 +2,8 @@
 
 #include "imgui.h"
 #include "implot.h"
+#include <algorithm>
+#include <list>
 
 Graph::Graph(size_t isize, double iymn, double iymx)
 {
@@ -12,44 +14,37 @@ Graph::Graph(size_t isize, double iymn, double iymx)
     ymin = iymn;
     ymax = iymx;
 
-    xs.reset(reinterpret_cast<double*>(malloc(sizeof(double) * size)));
-    ys.reset(reinterpret_cast<double*>(malloc(sizeof(double) * size)));
+    xs.resize(count + 1, 0);
+    ys.resize(count + 1, 0);
 
-    xs_rel.reset(reinterpret_cast<double*>(malloc(sizeof(double) * count)));
+    xs_rel.resize(count + 1, 0);
 }
 
 void Graph::add(double x, double y)
 {
-    if (index == size) {
-        memcpy(xs.get(), xs.get() + (size - count), count);
-        memcpy(ys.get(), ys.get() + (size - count), count);
-        index = count;
-    }
+    xs.erase(xs.begin());
+    ys.erase(ys.begin());
 
-    xs[index] = x;
-    ys[index] = y;
-
-    index += 1;
+    xs.push_back(x);
+    ys.push_back(y);
 }
 
 void Graph::draw(std::string pname, float width, float height)
 {
+    auto lxs = xs;
+    auto lys = ys;
+
     double totalTime = 0;
-    if (index > 0) {
-        totalTime = xs[index - 1];
+    totalTime = lxs[count - 1];
+
+    for (int j = 0; j < count; j++) {
+        xs_rel[j] = lxs[j] - totalTime;
     }
 
-    int fv = std::min(index - 1, count);
-    size_t offset = index > count? index - count : 0;
-
-    for (int j = 0; j < fv; j++) {
-        xs_rel[j] = (xs.get() + offset)[j] - totalTime;
-    }
-
-    double* ys_rel = ys.get() + offset;
+    double* ys_rel = lys.data();
 
     ImPlot::SetNextAxesLimits(-60, 0, ymin, ymax);
     ImPlot::BeginPlot(pname.c_str(), {width, height});
-    ImPlot::PlotLine(pname.c_str(), xs_rel.get(), ys_rel, fv);
+    ImPlot::PlotLine(pname.c_str(), xs_rel.data(), ys_rel, count);
     ImPlot::EndPlot();
 }
