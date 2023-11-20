@@ -13,5 +13,5 @@ struct clip {
 
 
 clip_t get_clip(clip_t** sequences, int (*address)[2]);
-clip_t** parse_spec(char* file_name, int (*start) [2]);
+clip_t** parse_spec(const char* file_name, int (*start) [2]);
 #endif

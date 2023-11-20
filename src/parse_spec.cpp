@@ -130,7 +130,7 @@ bool insert_clip(clip_t*** sequences_p, int* max_seq, int** max_clips_p, clip_t 
     return true;
 }
 
-clip_t** parse_spec (char* file_name, int (*start)[2])
+clip_t** parse_spec (const char* file_name, int (*start)[2])
 {
 
     FILE *fp = NULL;
@@ -141,7 +141,8 @@ clip_t** parse_spec (char* file_name, int (*start)[2])
         return 0;
     }
 
-    char* line = NULL;
+    const int buflen = 2048;
+    char line[buflen];
     size_t len = 0;
     ssize_t read;
 
@@ -151,12 +152,12 @@ clip_t** parse_spec (char* file_name, int (*start)[2])
     clip_t ** sequences = NULL;
 
     int mode = 0;
-    while ((read = getline(&line, &len, fp)) != -1) {
+    while (fgets(line, buflen, fp)) {
         trim(line);
         size_t size = strlen(line);
         if (size == 0 || line[0] == '#') continue;
 
-        printf("(%zd %zu %lu) %s\n", read, len, strlen(line), line);
+        printf("(%zu %lu) %s\n", len, strlen(line), line);
 
         if (line[0] == '[') {
             if (strstr(line, GEN_SEC) == line) {
@@ -186,8 +187,6 @@ clip_t** parse_spec (char* file_name, int (*start)[2])
             printf("(s%d.%d, %d, %d)\n", clip.address[0], clip.address[1], clip.start, clip.end);
         }
     }
-
-    free(line);
 
     printf("Start: [%d][%d]\n", start[0][0], start[0][1]);
     return sequences;

@@ -6,7 +6,6 @@
 #include <vector>
 #include <iostream>
 
-#include <argp.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -18,6 +17,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "implot.h"
+#include "argparse.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -35,13 +35,13 @@ static void glfw_error_callback (int error, const char *description)
 }
 
 
-int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
+int main_player(const char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
 {
     srand(time(NULL));
 
     const int q_size = 30;
 
-    Graph ft_graph {2000, 0, 1.0};
+    Graph ft_graph {2000, 0, 0.5};
     Graph fps_graph {2000, 0, 70};
     Graph qlen_graph {2000, 0, q_size * 1.5};
 
@@ -105,7 +105,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-    int show_debug = 1;
+    int show_debug = 0;
 
     double total_time = 0;
     auto t1 = std::chrono::steady_clock::now();
@@ -119,19 +119,11 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 
         frame_t frame;
         if (!swapready && decoder->pop(frame)) {
+            glfwPollEvents();
 
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
             frame_free(frame);
             swapready = true;
-
-
-        } else if (!swapready) {
-            msg_hist.add("Failed to pop frame!");
-        }
-
-        t2 = std::chrono::steady_clock::now();
-        if (t2 >= end && swapon) {
-            glfwPollEvents();
 
             if (ImGui::IsKeyPressed(ImGuiKey_A)) {
                 show_debug = !show_debug;
@@ -190,8 +182,14 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
             glClear (GL_COLOR_BUFFER_BIT);
 
             ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
-
             glfwMakeContextCurrent (window);
+
+        } else if (!swapready) {
+            msg_hist.add("Failed to pop frame!");
+        }
+
+        t2 = std::chrono::steady_clock::now();
+        if (t2 >= end && swapon) {
             glfwSwapBuffers (window);
             swapready = false;
             elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
@@ -230,44 +228,39 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     return 0;
 }
 
-char* movie = (char*) "./vid/vid.mp4";
-char* spec = (char*) "./vid/spec.txt";
-int flip = 0;
-
-static int parse_opt (int key, char * arg, struct argp_state *state)
-{
-    switch (key) {
-    case 'm':
-        movie = arg;
-        break;
-    case 's':
-        spec = arg;
-        break;
-    case 'r':
-        flip = atoi(arg);
-        break;
-    }
-    return 0;
-}
 
 int main(int argc, char **argv)
 {
-    struct argp_option options[] = {
-        {"movie", 'm', "path_to_movie", 0, "Specify path to the movie file"},
-        {"spec", 's', "path_to_spec", 0, "Specify path to the spect file"},
-        {"rot", 'r', "rotation_num", 0, "Specify rotation methon"},
-        {0}
-    };
+    argparse::ArgumentParser program("rrvp");
 
-    struct argp argp = {options, parse_opt};
-    argp_parse(&argp, argc, argv, 0, 0, 0);
+    program.add_argument("-m", "--movie")
+        .default_value(std::string{"./vid/vid.mp4"});
 
-    printf("%s %s %d\n", movie, spec, flip);
+    program.add_argument("-s", "--spec")
+        .default_value("./vid/spec.txt");
+
+    program.add_argument("-r", "--rotation")
+        .default_value(0);
+
+
+    try {
+        program.parse_args(argc, argv);
+    }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        std::exit(1);
+    }
+
+    auto movie = program.get<std::string>("--movie");
+    auto spec = program.get<std::string>("--spec");
+
+    printf("%s %s %d\n", movie.c_str(), spec.c_str(), 0);
 
     int start[2];
-    clip_t** sequences = parse_spec(spec, &start);
+    clip_t** sequences = parse_spec(spec.c_str(), &start);
 
     gst_init (&argc, &argv);
-    main_player(movie, flip, sequences, &start);
+    main_player(movie.c_str(), 0, sequences, &start);
     return 0;
 }
