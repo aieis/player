@@ -4,6 +4,7 @@
 #include <memory>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 #include <argp.h>
 #include <string.h>
@@ -25,7 +26,7 @@
 #include "list.h"
 
 #include "gstdecoder.h"
-#include "avdecoder.h"
+//#include "avdecoder.h"
 
 
 static void glfw_error_callback (int error, const char *description)
@@ -38,12 +39,14 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
 {
     srand(time(NULL));
 
-    Graph ft_graph {2000, 0.01, 0.05};
-    Graph fps_graph {2000, 0, 60};
-    Graph qlen_graph {2000, 0, 15};
+    const int q_size = 30;
 
-    ListView msg_hist {10};
-    ListView clip_hist {10};
+    Graph ft_graph {2000, 0, 1.0};
+    Graph fps_graph {2000, 0, 70};
+    Graph qlen_graph {2000, 0, q_size * 1.5};
+
+    ListView msg_hist {100};
+    ListView clip_hist {100};
 
     decdata_f ftdata = [&](DecoderData p) {
         ft_graph.add(p.tt, p.decode_time);
@@ -54,7 +57,7 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     addstr_f clipdata = [&](std::string s) { clip_hist.add(s);};
 
     std::shared_ptr<Decoder> decoder;
-    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, 10, ftdata, msgdata, clipdata));
+    decoder.reset(new Decoder(std::string(movie), flip_method, sequences, start_address, q_size, ftdata, msgdata, clipdata));
     decoder->init();
 
     int width = decoder->get_width();
@@ -111,75 +114,83 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
     auto end = t1 + std::chrono::milliseconds(33);
 
     bool swapready = false;
+    bool swapon = false;
     while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-        ImGui_ImplOpenGL3_NewFrame ();
-        ImGui_ImplGlfw_NewFrame ();
-        ImGui::NewFrame ();
-
-
-        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
-            show_debug = !show_debug;
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
-            break;
-        }
 
         frame_t frame;
         if (!swapready && decoder->pop(frame)) {
+
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
             frame_free(frame);
             swapready = true;
+
+
+        } else if (!swapready) {
+            msg_hist.add("Failed to pop frame!");
         }
-            
-        ImGui::GetBackgroundDrawList()->AddImage((void *) (guintptr) videotex, ImVec2 (0, 0),
-                                                 ImVec2 (width, height), ImVec2 (0, 0), ImVec2 (1, 1));
-
-        if (show_debug) {
-            ImGui::SetNextWindowPos({ 0, 0 });
-            float nwidth = (float)width / 2;
-            float nheight = (float) height / 3 * 2;
-            ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
-            ImGui::Begin("Graph", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
-                         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
-                         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
-
-            ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
-            fps_graph.draw("FPS", nwidth, nheight / 3);
-            qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
-
-            ImGui::End();
-
-            nwidth = (float)width / 4;
-            nheight = (float) height / 3 * 2;
-            ImGui::SetNextWindowPos({ width - nwidth - 5, 0 });
-            ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
-            
-            ImGui::Begin("History", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
-                         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
-                         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
-
-            msg_hist.draw("Messages", nwidth, nheight / 2);
-            clip_hist.draw("Clip History", nwidth, nheight / 2);
-            ImGui::End();
-        }
-
-        ImGui::Render();
-
-        int display_w, display_h;
-        glfwMakeContextCurrent (window);
-        glfwGetFramebufferSize (window, &display_w, &display_h);
-        glViewport (0, 0, display_w, display_h);
-
-        ImVec4 clear_color = ImVec4 (0, 0, 0, 1);
-        glClearColor (clear_color.x, clear_color.y, clear_color.z, clear_color.w);
-        glClear (GL_COLOR_BUFFER_BIT);
-
-        ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
 
         t2 = std::chrono::steady_clock::now();
-        if (t2 >= end && swapready) {            
+        if (t2 >= end && swapon) {
+            glfwPollEvents();
+
+            if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+                show_debug = !show_debug;
+            }
+
+            if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+                break;
+            }
+
+
+            ImGui_ImplOpenGL3_NewFrame ();
+            ImGui_ImplGlfw_NewFrame ();
+            ImGui::NewFrame ();
+
+            ImGui::GetBackgroundDrawList()->AddImage((void *) (guintptr) videotex, ImVec2 (0, 0),
+                                                     ImVec2 (width, height), ImVec2 (0, 0), ImVec2 (1, 1));
+
+            if (show_debug) {
+                ImGui::SetNextWindowPos({ 0, 0 });
+                float nwidth = (float)width / 2;
+                float nheight = (float) height / 3 * 2;
+                ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
+                ImGui::Begin("Graph", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
+                             | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
+                             | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
+
+                ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
+                fps_graph.draw("FPS", nwidth, nheight / 3);
+                qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
+
+                ImGui::End();
+
+                nwidth = (float)width / 4;
+                nheight = (float) height / 3 * 2;
+                ImGui::SetNextWindowPos({ width - nwidth - 5, 0 });
+                ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
+
+                ImGui::Begin("History", (bool*)0, ImGuiWindowFlags_NoBringToFrontOnFocus
+                             | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove
+                             | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar);
+
+                msg_hist.draw("Messages", nwidth, nheight / 2);
+                clip_hist.draw("Clip History", nwidth, nheight / 2);
+                ImGui::End();
+            }
+
+            ImGui::Render();
+
+            int display_w, display_h;
+            glfwMakeContextCurrent (window);
+            glfwGetFramebufferSize (window, &display_w, &display_h);
+            glViewport (0, 0, display_w, display_h);
+
+            ImVec4 clear_color = ImVec4 (0, 0, 0, 1);
+            glClearColor (clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+            glClear (GL_COLOR_BUFFER_BIT);
+
+            ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
+
             glfwMakeContextCurrent (window);
             glfwSwapBuffers (window);
             swapready = false;
@@ -190,6 +201,8 @@ int main_player(char* movie, int flip_method, clip_t** sequences, int (*start_ad
             total_time += elapsed_time;
             fps_graph.add(total_time, 1.0 / elapsed_time);
         }
+
+        swapon = swapready;
 
     }
 
