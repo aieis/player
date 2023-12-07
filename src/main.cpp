@@ -118,9 +118,20 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     while (!glfwWindowShouldClose(window)) {
 
         frame_t frame;
+        t2 = std::chrono::steady_clock::now();
+        if (t2 >= end && swapon) {
+            glfwSwapBuffers (window);
+            swapready = false;
+            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
+            t1 = t2;
+            end = t1 + std::chrono::milliseconds((int)frametime);
+
+            total_time += elapsed_time;
+            fps_graph.add(total_time, 1.0 / elapsed_time);
+        }
+
         if (!swapready && decoder->pop(frame)) {
             glfwPollEvents();
-
             glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, frame.data);
             frame_free(frame);
             swapready = true;
@@ -171,35 +182,13 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
             }
 
             ImGui::Render();
-
-            int display_w, display_h;
-            glfwMakeContextCurrent (window);
-            glfwGetFramebufferSize (window, &display_w, &display_h);
-            glViewport (0, 0, display_w, display_h);
-
-            ImVec4 clear_color = ImVec4 (0, 0, 0, 1);
-            glClearColor (clear_color.x, clear_color.y, clear_color.z, clear_color.w);
-            glClear (GL_COLOR_BUFFER_BIT);
-
             ImGui_ImplOpenGL3_RenderDrawData (ImGui::GetDrawData ());
-            glfwMakeContextCurrent (window);
 
         } else if (!swapready) {
             msg_hist.add("Failed to pop frame!");
         }
 
-        t2 = std::chrono::steady_clock::now();
-        if (t2 >= end && swapon) {
-            glfwSwapBuffers (window);
-            swapready = false;
-            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
-            t1 = t2;
-            end = t1 + std::chrono::milliseconds((int)frametime);
-
-            total_time += elapsed_time;
-            fps_graph.add(total_time, 1.0 / elapsed_time);
-        }
-
+    
         swapon = swapready;
 
     }

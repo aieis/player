@@ -4,14 +4,12 @@ GLIBINC = $(shell pkg-config --cflags glib-2.0)
 GLIBLIB = $(shell pkg-config --libs glib-2.0)
 GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
-
 GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
 GTKLIB =  $(shell pkg-config --libs gtk+-2.0)
+EXINC = $(shell pkg-config --cflags libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil vulkan)
+EXLIB = $(shell pkg-config --libs libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil vulkan)
 
-EXINC = $(shell pkg-config --cflags libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
-EXLIB = $(shell pkg-config --libs libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
-
-INCS = $(GLFWINC) $(GLIBINC) $(GSTINC) $(EXINC)
+INCS = $(GLFWINC) $(GLIBINC) $(GSTINC) $(EXINC) -I./extern/imgui -I./extern/implot -I./extern/readerwriterqueue -I./extern/argparse
 LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB) $(EXLIB)
 
 CC = gcc
