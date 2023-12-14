@@ -44,7 +44,8 @@ void Graph::draw(std::string pname, float width, float height)
     double* ys_rel = lys.data();
 
     ImPlot::SetNextAxesLimits(-60, 0, ymin, ymax);
-    ImPlot::BeginPlot(pname.c_str(), {width, height});
-    ImPlot::PlotLine(pname.c_str(), xs_rel.data(), ys_rel, count);
-    ImPlot::EndPlot();
+    if(ImPlot::BeginPlot(pname.c_str(), {width, height})) {
+        ImPlot::PlotLine(pname.c_str(), xs_rel.data(), ys_rel, count);
+        ImPlot::EndPlot();
+    } 
 }
