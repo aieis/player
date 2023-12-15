@@ -87,7 +87,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
         return 1;
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    
+
     printf ("video resolution is %dx%d\n", width, height);
 
     GLFWwindow *window = glfwCreateWindow (width, height, "RRVP - Rapid Response Video Player", NULL, NULL);
@@ -122,10 +122,10 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    
-    
+
+
     ImGui::StyleColorsDark();
-    
+
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
     ImGui_ImplVulkan_InitInfo init_info = interface.makeInfo();
@@ -137,7 +137,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     memset(init_data, 0, image_size);
     bool ret = interface.LoadTextureFromData(&my_texture, init_data, width, height);
     free(init_data);
-    
+
     IM_ASSERT(ret);
     {
         VkCommandPool command_pool = wd->Frames[wd->FrameIndex].CommandPool;
@@ -167,8 +167,10 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
         ImGui_ImplVulkan_DestroyFontUploadObjects();
     }
 
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    
+    interface.g_SwapChainRebuild = true;
+
+    ImVec4 clear_color = ImVec4(0.f, 0.f, 0.f, 1.00f);
+
     int show_debug = 0;
     double total_time = 0;
     auto t1 = std::chrono::steady_clock::now();
@@ -176,51 +178,51 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     double elapsed_time;
     auto end = t1 + std::chrono::milliseconds(33);
 
-    bool swapready = false;
     while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+            show_debug = !show_debug;
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+            break;
+        }
 
         frame_t frame;
         t2 = std::chrono::steady_clock::now();
-        if (t2 >= end && swapready)
+        if (t2 >= end)
         {
-            int w, h;
-            glfwGetFramebufferSize(window, &w, &h);
-            if (width > 0 && height > 0)
-            {
-                ImGui_ImplVulkan_SetMinImageCount(interface.g_MinImageCount);
-                ImGui_ImplVulkanH_CreateOrResizeWindow(interface.g_Instance, interface.g_PhysicalDevice, interface.g_Device, &interface.g_MainWindowData, interface.g_QueueFamily, interface.g_Allocator, w, h, interface.g_MinImageCount);
-                interface.g_MainWindowData.FrameIndex = 0;
-                interface.g_SwapChainRebuild = false;
+
+            if (interface.g_SwapChainRebuild) {
+                int w, h;
+                glfwGetFramebufferSize(window, &w, &h);
+                if (width > 0 && height > 0){
+                    ImGui_ImplVulkan_SetMinImageCount(interface.g_MinImageCount);
+                    ImGui_ImplVulkanH_CreateOrResizeWindow(interface.g_Instance, interface.g_PhysicalDevice, interface.g_Device, &interface.g_MainWindowData, interface.g_QueueFamily, interface.g_Allocator, w, h, interface.g_MinImageCount);
+                    interface.g_MainWindowData.FrameIndex = 0;
+                    interface.g_SwapChainRebuild = false;
+                }
             }
 
-            swapready = false;
-            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
-            t1 = t2;
-            end = t1 + std::chrono::milliseconds((int)frametime);
-
-            total_time += elapsed_time;
-            fps_graph.add(total_time, 1.0 / elapsed_time);
-
-        }
-
-
-        if (!swapready && decoder->pop(frame)) {
-            glfwPollEvents();
-            if (ImGui::IsKeyPressed(ImGuiKey_A)) {
-                show_debug = !show_debug;
+            if (decoder->pop(frame)) {
+                interface.UpdateTexture(&my_texture, frame.data, image_size);
+                elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
+                t1 = t2;
+                end = t1 + std::chrono::milliseconds((int)frametime);
+                total_time += elapsed_time;
+                fps_graph.add(total_time, 1.0 / elapsed_time);
+                frame_free(frame);
+            } else {
+                msg_hist.add("Failed to pop frame.");
+                continue;
             }
 
-            if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
-                break;
-            }
-            
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
 
-            interface.UpdateTexture(&my_texture, frame.data, image_size);
-            frame_free(frame);
-            
+
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
             ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -228,8 +230,6 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
             ImGui::Image((ImTextureID)my_texture.DS, ImVec2(my_texture.Width, my_texture.Height));
             ImGui::End();
             ImGui::PopStyleVar(1);
-            
-            swapready = true;
 
             if (show_debug) {
                 ImGui::SetNextWindowPos(ImVec2(10, 10));
@@ -240,8 +240,8 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
                 ImGui::SetNextWindowSize(dims);
                 ImGui::Begin("Config", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
-                    
-                
+
+
                 ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
                 fps_graph.draw("FPS", nwidth, nheight / 3);
                 qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
@@ -254,7 +254,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
                 ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
 
                 ImGui::Begin("History", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
-                
+
                 msg_hist.draw("Messages", nwidth, nheight / 2);
                 clip_hist.draw("Clip History", nwidth, nheight / 2);
                 ImGui::End();
@@ -269,10 +269,8 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
             wd->ClearValue.color.float32[3] = clear_color.w;
 
             interface.FrameRender(wd, draw_data);
-            interface.FramePresent(wd);                    
-        } else if (!swapready) {
-            msg_hist.add("Failed to pop frame!");
-        }        
+            interface.FramePresent(wd);
+        }
     }
 
     err = vkDeviceWaitIdle(interface.g_Device);
@@ -285,7 +283,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
     interface.CleanupVulkanWindow();
     interface.CleanupVulkan();
-    
+
     glfwDestroyWindow(window);
     glfwTerminate();
 
