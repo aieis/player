@@ -40,6 +40,8 @@ class Decoder
     addr_t start_address;
     int width;
     int height;
+    int fr_n;
+    int fr_d;
     double framerate;
     std::string format;
 
@@ -55,12 +57,14 @@ class Decoder
     
     bool init();
     
-    void play();
+    void play(GstElement* appsrc);
     void stop();
     
     int get_width() {return width;};
     int get_height() {return height;};
+    std::string get_format() {return format;};
     double get_framerate() {return framerate;};
+    void get_framerate(int* numer, int* denom) {*numer = fr_n; *denom = fr_d;};
 
     bool pop(frame_t &frame);
 };

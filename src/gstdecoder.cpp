@@ -2,6 +2,7 @@
 
 #include "decoder.h"
 #include "gst/app/gstappsink.h"
+#include "gst/app/gstappsrc.h"
 #include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
 #include "gst/gstbus.h"
@@ -58,6 +59,28 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
     }
     
     return GST_MESSAGE_TYPE_NAME(msg);
+}
+
+static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
+{
+    static GstClockTime timestamp = 0;
+    GstMapInfo map_og;
+    gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);    
+      
+    size_t size = gst_buffer_get_size(buffer_og);
+    GstBuffer *buffer = gst_buffer_new_allocate (NULL, size, NULL);
+      
+    GstMapInfo map;
+    gst_buffer_map (buffer, &map, GST_MAP_WRITE);
+    memcpy( (uint8_t *)map.data, (uint8_t *) map_og.data,  gst_buffer_get_size( buffer ) );
+    gst_buffer_unmap(buffer_og, &map_og);
+      
+    GST_BUFFER_PTS (buffer) = timestamp;
+    GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
+
+    timestamp += GST_BUFFER_DURATION (buffer);
+    gst_app_src_push_buffer(GST_APP_SRC(appsrc), buffer);
+    gst_buffer_unmap(buffer, &map);
 }
 
 
@@ -193,12 +216,9 @@ bool Decoder::init()
 
     gst_structure_get_int(structure, "width", &width);
     gst_structure_get_int(structure, "height", &height);
-
-    int numer;
-    int denom;
-
-    gst_structure_get_fraction(structure, "framerate", &numer, &denom);
-    framerate = (double)numer/denom;
+    
+    gst_structure_get_fraction(structure, "framerate", &fr_n, &fr_d);
+    framerate = (double)fr_n/fr_d;
 
     const gchar * format_local = gst_structure_get_string(structure, "format");
     format = std::string(format_local);
@@ -208,7 +228,7 @@ bool Decoder::init()
     return true;
 }
 
-void Decoder::play()
+void Decoder::play(GstElement* appsrc)
 {
     clip_t cclip = get_clip(sequences, start_address);
     int start = cclip.start;
@@ -247,19 +267,24 @@ void Decoder::play()
 
         GstBuffer *buffer =  gst_sample_get_buffer(sample_frame);
         if (buffer) {
-            GstMapInfo map;
-            gst_buffer_map (buffer, &map, GST_MAP_READ);
+            // GstMapInfo map;
+            // gst_buffer_map (buffer, &map, GST_MAP_READ);
+            push_to_src(appsrc, buffer);
 
-            frame_t frame;
-            frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
-            memcpy(frame.data, map.data, frame_size);
-            gst_buffer_unmap(buffer, &map);
-
-            while (frames.size_approx() > qmax) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            while (gst_app_src_get_current_level_buffers(GST_APP_SRC(appsrc)) > qmax) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(3));                
             }
+            
+            // frame_t frame;
+            // frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
+            // memcpy(frame.data, map.data, frame_size);
+            // gst_buffer_unmap(buffer, &map);
 
-            frames.enqueue(frame);
+            // while (frames.size_approx() > qmax) {
+            //     std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            // }
+
+            // frames.enqueue(frame);
         }
 
         gst_sample_unref(sample_frame);

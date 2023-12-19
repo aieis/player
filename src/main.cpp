@@ -15,14 +15,6 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define GLFW_INCLUDE_NONE
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
-#include "imgui_impl_glfw.h"
-#include "vulkan_interop.h"
-
-
 #include "implot.h"
 #include "argparse.hpp"
 
@@ -35,19 +27,6 @@
 #include "gstdecoder.h"
 //#include "avdecoder.h"
 
-static void check_vk_result(VkResult err)
-{
-    if (err == 0)
-        return;
-    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
-    if (err < 0)
-        abort();
-}
-
-static void glfw_error_callback (int error, const char *description)
-{
-    g_print ("GLFW Error %d: %s\n", error, description);
-}
 
 
 int main_player(const char* movie, int flip_method, clip_t** sequences, int (*start_address)[2])
@@ -77,217 +56,42 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
     int width = decoder->get_width();
     int height = decoder->get_height();
-    double framerate = decoder->get_framerate();
-    double frametime = 1000.0 / framerate;
+    std::string format = decoder->get_format();
 
-    std::thread decoder_thread ([&] {decoder->play();});
+    int fr_n;
+    int fr_d;
+    decoder->get_framerate(&fr_n, &fr_d);
+    
+    GMainLoop* loop = g_main_loop_new (NULL, FALSE);
 
-    glfwSetErrorCallback (glfw_error_callback);
-    if (!glfwInit ())
-        return 1;
+    const char* pipe_args =
+        "appsrc name=appsrc max-buffers=10"
+        " ! videoconvert ! fpsdisplaysink video-sink=glimagesink";
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    GstElement* pipeline = gst_parse_launch(pipe_args, NULL);
+    GstElement* appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "appsrc");
+    
+    char caps_args[1024];
+    sprintf(caps_args, "video/x-raw,format=%s,height=%d,width=%d,framerate=%d/%d", format.c_str(), height, width, fr_n, fr_d);
+    printf("Caps: %s\n", caps_args);
+    
+    g_object_set(gst_bin_get_by_name(GST_BIN(pipeline), "appsrc"), "caps", gst_caps_from_string(caps_args), NULL);
+    gst_element_set_state (pipeline, GST_STATE_PLAYING);
 
-    printf ("video resolution is %dx%d\n", width, height);
+    std::thread decoder_thread ([&] {decoder->play(appsrc);});
 
-    GLFWwindow *window = glfwCreateWindow (width, height, "RRVP - Rapid Response Video Player", NULL, NULL);
-    if (window == NULL)
-        return 1;
-
-    if (!glfwVulkanSupported())
-    {
-        printf("GLFW: Vulkan Not Supported\n");
-        return 1;
-    }
-
-    VulkanInterface interface{};
-    uint32_t extensions_count = 0;
-    const char** extensions = glfwGetRequiredInstanceExtensions(&extensions_count);
-    interface.SetupVulkan(extensions, extensions_count);
-
-    // Create Window Surface
-    VkSurfaceKHR surface;
-    VkResult err = glfwCreateWindowSurface(interface.g_Instance, window, interface.g_Allocator, &surface);
-    check_vk_result(err);
-
-    // Create Framebuffers
-    int w, h;
-    glfwGetFramebufferSize(window, &w, &h);
-    ImGui_ImplVulkanH_Window* wd = &interface.g_MainWindowData;
-    interface.SetupVulkanWindow(wd, surface, w, h);
-
-    // Setup Dear ImGui context
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-
-
-    ImGui::StyleColorsDark();
-
-    ImGui_ImplGlfw_InitForVulkan(window, true);
-
-    ImGui_ImplVulkan_InitInfo init_info = interface.makeInfo();
-    ImGui_ImplVulkan_Init(&init_info, wd->RenderPass);
-
-    int image_size = width * height * 4;
-    TextureData my_texture;
-    char* init_data = reinterpret_cast<char*>(malloc(image_size));
-    memset(init_data, 0, image_size);
-    bool ret = interface.LoadTextureFromData(&my_texture, init_data, width, height);
-    free(init_data);
-
-    IM_ASSERT(ret);
-    {
-        VkCommandPool command_pool = wd->Frames[wd->FrameIndex].CommandPool;
-        VkCommandBuffer command_buffer = wd->Frames[wd->FrameIndex].CommandBuffer;
-
-        err = vkResetCommandPool(interface.g_Device, command_pool, 0);
-        check_vk_result(err);
-        VkCommandBufferBeginInfo begin_info = {};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        err = vkBeginCommandBuffer(command_buffer, &begin_info);
-        check_vk_result(err);
-
-        ImGui_ImplVulkan_CreateFontsTexture(command_buffer);
-
-        VkSubmitInfo end_info = {};
-        end_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        end_info.commandBufferCount = 1;
-        end_info.pCommandBuffers = &command_buffer;
-        err = vkEndCommandBuffer(command_buffer);
-        check_vk_result(err);
-        err = vkQueueSubmit(interface.g_Queue, 1, &end_info, VK_NULL_HANDLE);
-        check_vk_result(err);
-
-        err = vkDeviceWaitIdle(interface.g_Device);
-        check_vk_result(err);
-        ImGui_ImplVulkan_DestroyFontUploadObjects();
-    }
-
-    interface.g_SwapChainRebuild = true;
-
-    ImVec4 clear_color = ImVec4(0.f, 0.f, 0.f, 1.00f);
-
-    int show_debug = 0;
-    double total_time = 0;
-    auto t1 = std::chrono::steady_clock::now();
-    auto t2 = t1;
-    double elapsed_time;
-    auto end = t1 + std::chrono::milliseconds(33);
-
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-
-        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
-            show_debug = !show_debug;
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
-            break;
-        }
-
-        frame_t frame;
-        t2 = std::chrono::steady_clock::now();
-        if (t2 >= end)
-        {
-
-            if (interface.g_SwapChainRebuild) {
-                int w, h;
-                glfwGetFramebufferSize(window, &w, &h);
-                if (width > 0 && height > 0){
-                    ImGui_ImplVulkan_SetMinImageCount(interface.g_MinImageCount);
-                    ImGui_ImplVulkanH_CreateOrResizeWindow(interface.g_Instance, interface.g_PhysicalDevice, interface.g_Device, &interface.g_MainWindowData, interface.g_QueueFamily, interface.g_Allocator, w, h, interface.g_MinImageCount);
-                    interface.g_MainWindowData.FrameIndex = 0;
-                    interface.g_SwapChainRebuild = false;
-                }
-            }
-
-            if (decoder->pop(frame)) {
-                interface.UpdateTexture(&my_texture, frame.data, image_size);
-                elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
-                t1 = t2;
-                end = t1 + std::chrono::milliseconds((int)frametime);
-                total_time += elapsed_time;
-                fps_graph.add(total_time, 1.0 / elapsed_time);
-                frame_free(frame);
-            } else {
-                msg_hist.add("Failed to pop frame.");
-                continue;
-            }
-
-            ImGui_ImplVulkan_NewFrame();
-            ImGui_ImplGlfw_NewFrame();
-            ImGui::NewFrame();
-
-
-            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-            ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-            ImGui::Begin("Window", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
-            ImGui::Image((ImTextureID)my_texture.DS, ImVec2(my_texture.Width, my_texture.Height));
-            ImGui::End();
-            ImGui::PopStyleVar(1);
-
-            if (show_debug) {
-                ImGui::SetNextWindowPos(ImVec2(10, 10));
-                ImVec2 dims = ImVec2(ImGui::GetIO().DisplaySize / 3);
-                float nwidth = dims.x - 10;
-                float nheight = dims.y - 10;
-
-                ImGui::SetNextWindowSize(dims);
-                ImGui::Begin("Config", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
-
-
-
-                ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
-                fps_graph.draw("FPS", nwidth, nheight / 3);
-                qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
-
-                ImGui::End();
-
-                nwidth = (float)width / 4;
-                nheight = (float) height / 3 * 2;
-                ImGui::SetNextWindowPos({ width - nwidth - 5, 0 });
-                ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
-
-                ImGui::Begin("History", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
-
-                msg_hist.draw("Messages", nwidth, nheight / 2);
-                clip_hist.draw("Clip History", nwidth, nheight / 2);
-                ImGui::End();
-            }
-
-            ImGui::Render();
-
-            ImDrawData* draw_data = ImGui::GetDrawData();
-            wd->ClearValue.color.float32[0] = clear_color.x * clear_color.w;
-            wd->ClearValue.color.float32[1] = clear_color.y * clear_color.w;
-            wd->ClearValue.color.float32[2] = clear_color.z * clear_color.w;
-            wd->ClearValue.color.float32[3] = clear_color.w;
-
-            interface.FrameRender(wd, draw_data);
-            interface.FramePresent(wd);
-        }
-    }
-
-    err = vkDeviceWaitIdle(interface.g_Device);
-    check_vk_result(err);
-    interface.RemoveTexture(&my_texture);
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    ImPlot::DestroyContext();
-
-    interface.CleanupVulkanWindow();
-    interface.CleanupVulkan();
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-
-
+    g_main_loop_run (loop);
+    gst_element_set_state (pipeline, GST_STATE_NULL);
+    gst_object_unref (GST_OBJECT (pipeline));
+    g_main_loop_unref (loop);
+    
+    
+    // int show_debug = 0;
+    // double total_time = 0;
+    // auto t1 = std::chrono::steady_clock::now();
+    // auto t2 = t1;
+    // double elapsed_time;
+    // auto end = t1 + std::chrono::milliseconds(33);
     decoder->stop();
 
     frame_t frame;
