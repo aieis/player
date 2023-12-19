@@ -1,5 +1,3 @@
-#define IMGUI_DEFINE_MATH_OPERATORS
-#include "imgui.h"
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -15,7 +13,6 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "implot.h"
 #include "argparse.hpp"
 
 #include <GLFW/glfw3.h>
