@@ -69,7 +69,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     GstElement* appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "appsrc");
     
     char caps_args[1024];
-    sprintf(caps_args, "video/x-raw,format=%s,height=%d,width=%d,framerate=%d/%d", format.c_str(), height, width, fr_n, fr_d);
+    sprintf(caps_args, "video/x-raw,format=(string)%s,height=%d,width=%d,framerate=%d/%d", format.c_str(), height, width, fr_n, fr_d);
     printf("Caps: %s\n", caps_args);
     
     g_object_set(gst_bin_get_by_name(GST_BIN(pipeline), "appsrc"), "caps", gst_caps_from_string(caps_args), NULL);
