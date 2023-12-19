@@ -63,7 +63,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
     const char* pipe_args =
         "appsrc name=appsrc max-buffers=10"
-        " ! videoconvert ! fpsdisplaysink video-sink=glimagesink";
+        " ! videoconvert ! fpsdisplaysink video-sink=waylandsink sync=true";
 
     GstElement* pipeline = gst_parse_launch(pipe_args, NULL);
     GstElement* appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "appsrc");

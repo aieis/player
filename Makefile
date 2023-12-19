@@ -6,9 +6,9 @@ GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 INCS = $(GLFWINC) $(GLIBINC) $(GSTINC) $(EXINC) -I./extern/readerwriterqueue -I./extern/argparse
 LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB) $(EXLIB)
 
-CC = gcc -Os -g
-LD = gcc -Os -g
-CFLAGS= $(INCS) -pedantic -Wall -std=c++2b	
+CC = gcc -O3
+LD = gcc -O3
+CFLAGS= $(INCS) -pedantic -Wall -std=c++17
 LDFLAGS=$(LIBS) -lm -lGL -lstdc++
 
 SRCDIR	= src
