@@ -178,13 +178,12 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     gboolean link = gst_element_link(pipe.src, pipe.demux);
     g_assert(link);
 
-    link = gst_element_link_many(pipe.parser, pipe.dec, pipe.conv, pipe.sink, NULL);
+    link = gst_element_link_many(pipe.parser, pipe.dec, pipe.conv, NULL);
     g_assert(link);
 
-
-    // GstCaps* caps = gst_caps_new_simple ("video/x-raw", NULL);
-    // link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
-    // g_assert(link);
+    GstCaps* caps = gst_caps_new_simple ("video/x-raw", "format",  G_TYPE_STRING, "I420", NULL);
+    link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
+    g_assert(link);
 
 
     if (!link) {
