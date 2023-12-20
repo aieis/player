@@ -61,9 +61,8 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
     return GST_MESSAGE_TYPE_NAME(msg);
 }
 
-static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
+GstClockTime push_to_src(GstElement* appsrc, GstBuffer* buffer_og, GstClockTime timestamp, int numer, int denom)
 {
-    static GstClockTime timestamp = 0;
     GstMapInfo map_og;
     gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);
 
@@ -76,11 +75,12 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
     gst_buffer_unmap(buffer_og, &map_og);
 
     GST_BUFFER_PTS (buffer) = timestamp;
-    GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
+    GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND * denom, numer);
 
     timestamp += GST_BUFFER_DURATION (buffer);
     gst_app_src_push_buffer(GST_APP_SRC(appsrc), buffer);
     gst_buffer_unmap(buffer, &map);
+    return timestamp;
 }
 
 
@@ -255,6 +255,8 @@ void Decoder::play(GstElement* appsrc)
     double elapsed_time;
 
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
+
+    GstClockTime timestamp = 0;
     while (running) {
         GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
         if (msg != NULL) {
@@ -276,7 +278,7 @@ void Decoder::play(GstElement* appsrc)
         if (buffer) {
             // GstMapInfo map;
             // gst_buffer_map (buffer, &map, GST_MAP_READ);
-            push_to_src(appsrc, buffer);
+            timestamp = push_to_src(appsrc, buffer, timestamp, fr_n, fr_d);
 
             while (gst_app_src_get_current_level_buffers(GST_APP_SRC(appsrc)) > qmax) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(3));
