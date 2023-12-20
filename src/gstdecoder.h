@@ -17,6 +17,8 @@
 struct pipe_t {
     GstElement* pipeline;
     GstElement* src;
+    GstElement* demux;
+    GstElement* parser;
     GstElement* dec;
     GstElement* flip;
     GstElement* conv;

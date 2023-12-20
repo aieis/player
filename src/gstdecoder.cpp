@@ -41,7 +41,7 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
     switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_EOS:
         return "End of stream\n";
-        
+
     case GST_MESSAGE_ERROR: {
         gchar  *debug;
         GError *error;
@@ -51,13 +51,13 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
 
         std::string err(error->message);
         g_error_free (error);
-        
-        return "Error: " + err;        
+
+        return "Error: " + err;
     }
     default:
         return GST_MESSAGE_TYPE_NAME(msg);
     }
-    
+
     return GST_MESSAGE_TYPE_NAME(msg);
 }
 
@@ -65,16 +65,16 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
 {
     static GstClockTime timestamp = 0;
     GstMapInfo map_og;
-    gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);    
-      
+    gst_buffer_map (buffer_og, &map_og, GST_MAP_READ);
+
     size_t size = gst_buffer_get_size(buffer_og);
     GstBuffer *buffer = gst_buffer_new_allocate (NULL, size, NULL);
-      
+
     GstMapInfo map;
     gst_buffer_map (buffer, &map, GST_MAP_WRITE);
     memcpy( (uint8_t *)map.data, (uint8_t *) map_og.data,  gst_buffer_get_size( buffer ) );
     gst_buffer_unmap(buffer_og, &map_og);
-      
+
     GST_BUFFER_PTS (buffer) = timestamp;
     GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
 
@@ -86,7 +86,7 @@ static void push_to_src(GstElement* appsrc, GstBuffer* buffer_og)
 
 static void pad_added_handler(GstElement *src, GstPad *new_pad, pipe_t *data)
 {
-  GstPad *sink_pad = gst_element_get_static_pad(data->conv, "sink");
+  GstPad *sink_pad = gst_element_get_static_pad(data->parser, "sink");
   GstPadLinkReturn ret;
   GstCaps *new_pad_caps = NULL;
   GstStructure *new_pad_struct = NULL;
@@ -105,10 +105,12 @@ static void pad_added_handler(GstElement *src, GstPad *new_pad, pipe_t *data)
   new_pad_caps = gst_pad_get_current_caps(new_pad);
   new_pad_struct = gst_caps_get_structure(new_pad_caps, 0);
   new_pad_type = gst_structure_get_name(new_pad_struct);
+
+  g_print("  Pad has type '%s'.\n", new_pad_type);
   if (!g_str_has_prefix(new_pad_type, "video/x-raw"))
   {
     g_print("  It has type '%s' which is not raw video. Ignoring.\n", new_pad_type);
-    goto exit;
+    //goto exit;
   }
 
   /* Attempt the link */
@@ -150,13 +152,15 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
 
 
     pipe.src = gst_element_factory_make("filesrc", "source0");
-    pipe.dec = gst_element_factory_make("decodebin", "decoder0");
+    pipe.demux = gst_element_factory_make("qtdemux", "demux0");
+    pipe.parser = gst_element_factory_make("h264parse", "parse0");
+    pipe.dec = gst_element_factory_make("avdec_h264", "decoder0");
     pipe.conv = gst_element_factory_make("videoconvert", "conv0");
     pipe.sink = gst_element_factory_make("appsink", "sink0");
 
     pipe.pipeline = gst_pipeline_new ("decoder-pipe");
 
-    if (!pipe.pipeline || !pipe.src || !pipe.dec || !pipe.conv || !pipe.sink) {
+    if (!pipe.pipeline || !pipe.src || !pipe.demux || !pipe.parser || !pipe.dec || !pipe.conv || !pipe.sink) {
         printf("Not all elements could be created.\n");
         return;
     }
@@ -165,20 +169,24 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     g_object_set(pipe.sink, "max-buffers", 2, NULL);
     g_object_set(pipe.sink, "drop", false, NULL);
     g_object_set(pipe.sink, "sync", false, NULL);
-     g_object_set(pipe.sink, "async", true, NULL);
-    
-    gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.dec, pipe.conv, pipe.sink, NULL);
-    g_signal_connect(pipe.dec, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
+    g_object_set(pipe.sink, "async", true, NULL);
 
-    
-    gboolean link = gst_element_link(pipe.src, pipe.dec);
+    gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.demux, pipe.parser, pipe.dec, pipe.conv, pipe.sink, NULL);
+    g_signal_connect(pipe.demux, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
+
+
+    gboolean link = gst_element_link(pipe.src, pipe.demux);
     g_assert(link);
-    
-    GstCaps* caps = gst_caps_new_simple ("video/x-raw", NULL);
-    link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
+
+    link = gst_element_link_many(pipe.parser, pipe.dec, pipe.conv, pipe.sink, NULL);
     g_assert(link);
-    
-    
+
+
+    // GstCaps* caps = gst_caps_new_simple ("video/x-raw", NULL);
+    // link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
+    // g_assert(link);
+
+
     if (!link) {
         printf("Error when linking pipeline \n");
     }
@@ -189,7 +197,7 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
 
     pipe.bus = gst_element_get_bus(pipe.pipeline);
     //pipe.bus_watch_id = gst_bus_add_watch (pipe.bus, bus_call, NULL);
-    
+
 
 }
 
@@ -216,7 +224,7 @@ bool Decoder::init()
 
     gst_structure_get_int(structure, "width", &width);
     gst_structure_get_int(structure, "height", &height);
-    
+
     gst_structure_get_fraction(structure, "framerate", &fr_n, &fr_d);
     framerate = (double)fr_n/fr_d;
 
@@ -246,7 +254,7 @@ void Decoder::play(GstElement* appsrc)
     auto t1 = std::chrono::steady_clock::now();
     auto t2 = t1;
     double elapsed_time;
-    
+
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
     while (running) {
         GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
@@ -260,7 +268,7 @@ void Decoder::play(GstElement* appsrc)
         if (!sample_frame) {
             continue;
         }
-        
+
         if (!sample_frame) {
             continue;
         }
@@ -272,9 +280,9 @@ void Decoder::play(GstElement* appsrc)
             push_to_src(appsrc, buffer);
 
             while (gst_app_src_get_current_level_buffers(GST_APP_SRC(appsrc)) > qmax) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));                
+                std::this_thread::sleep_for(std::chrono::milliseconds(3));
             }
-            
+
             // frame_t frame;
             // frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
             // memcpy(frame.data, map.data, frame_size);
@@ -295,7 +303,7 @@ void Decoder::play(GstElement* appsrc)
             start = cclip.start;
             frame = start;
             frame_time = ((double) frame - 1)  / framerate;
-            
+
             printf("Seeking frame %d => %f \n", start, frame_time);
 
             if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
@@ -303,10 +311,10 @@ void Decoder::play(GstElement* appsrc)
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
-            
+
             printf("Seeking successful %d => %f \n", start, frame_time);
             clip_changed(std::to_string(cclip.address[0]) + "." + std::to_string(cclip.address[1]));
-            
+
             end = cclip.end;
         }
 
