@@ -18,6 +18,8 @@ struct TextureData
     VkBuffer        UploadBuffer;
     VkDeviceMemory  UploadBufferMemory;
 
+    void* map;
+
     TextureData() { memset(this, 0, sizeof(*this)); }
 };
 

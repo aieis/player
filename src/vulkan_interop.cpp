@@ -434,17 +434,17 @@ bool VulkanInterface::LoadTextureFromData(TextureData* tex_data, void* image_dat
 
     // Upload to Buffer:
     {
-        void* map = NULL;
-        err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &map);
+        tex_data->map = NULL;
+        err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &tex_data->map);
         check_vk_result(err);
-        memcpy(map, image_data, image_size);
+        memcpy(tex_data->map, image_data, image_size);
         VkMappedMemoryRange range[1] = {};
         range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
         range[0].memory = tex_data->UploadBufferMemory;
         range[0].size = image_size;
         err = vkFlushMappedMemoryRanges(g_Device, 1, range);
         check_vk_result(err);
-        vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
+        //vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
     }
     
     // Create a command buffer that will perform following steps when hit in the command queue.
@@ -525,17 +525,18 @@ bool VulkanInterface::LoadTextureFromData(TextureData* tex_data, void* image_dat
 
 void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int image_size)
 {
-    void* map = NULL;
-    VkResult err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &map);
-    check_vk_result(err);
-    memcpy(map, image_data, image_size);
-    VkMappedMemoryRange range[1] = {};
-    range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    range[0].memory = tex_data->UploadBufferMemory;
-    range[0].size = image_size;
-    err = vkFlushMappedMemoryRanges(g_Device, 1, range);
-    check_vk_result(err);
-    vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
+    VkResult err;
+    // void* map = NULL;
+    // VkResult err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &map);
+    // check_vk_result(err);
+    memcpy(tex_data->map, image_data, image_size);
+    // VkMappedMemoryRange range[1] = {};
+    // range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    // range[0].memory = tex_data->UploadBufferMemory;
+    // range[0].size = image_size;
+    // err = vkFlushMappedMemoryRanges(g_Device, 1, range);
+    // check_vk_result(err);
+    //vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
 
 
     VkCommandPool command_pool = g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
@@ -605,8 +606,8 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         check_vk_result(err);
         err = vkQueueSubmit(g_Queue, 1, &end_info, VK_NULL_HANDLE);
         check_vk_result(err);
-        err = vkDeviceWaitIdle(g_Device);
-        check_vk_result(err);
+        // err = vkDeviceWaitIdle(g_Device);
+        // check_vk_result(err);
     }
 
 }
@@ -614,6 +615,7 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
 // Helper function to cleanup an image loaded with LoadTextureFromFile
 void VulkanInterface::RemoveTexture(TextureData* tex_data)
 {
+    vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
     vkFreeMemory(g_Device, tex_data->UploadBufferMemory, nullptr);
     vkDestroyBuffer(g_Device, tex_data->UploadBuffer, nullptr);
     vkDestroySampler(g_Device, tex_data->Sampler, nullptr);

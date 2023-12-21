@@ -18,7 +18,7 @@
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
+
 #include "imgui_impl_glfw.h"
 #include "vulkan_interop.h"
 
@@ -65,7 +65,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
     decdata_f ftdata = [&](DecoderData p) {
         ft_graph.add(p.tt, p.decode_time);
-        qlen_graph.add(p.tt, p.queue_size);
+        //qlen_graph.add(p.tt, p.queue_size);
     };
 
     addstr_f msgdata = [&](std::string s) { msg_hist.add(s);};
@@ -78,7 +78,7 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     int width = decoder->get_width();
     int height = decoder->get_height();
     double framerate = decoder->get_framerate();
-    double frametime = 1000.0 / framerate;
+    double frametime_ns = 1000000000.0 / framerate;
 
     std::thread decoder_thread ([&] {decoder->play();});
 
@@ -177,18 +177,8 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
     auto t2 = t1;
     double elapsed_time;
     auto end = t1 + std::chrono::milliseconds(33);
-
+    unsigned long slow_frames = 0;
     while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-
-        if (ImGui::IsKeyPressed(ImGuiKey_A)) {
-            show_debug = !show_debug;
-        }
-
-        if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
-            break;
-        }
-
         frame_t frame;
         t2 = std::chrono::steady_clock::now();
         if (t2 >= end)
@@ -209,19 +199,29 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
                 interface.UpdateTexture(&my_texture, frame.data, image_size);
                 elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
                 t1 = t2;
-                end = t1 + std::chrono::milliseconds((int)frametime);
+                end = t1 + std::chrono::nanoseconds((int)frametime_ns);
                 total_time += elapsed_time;
                 fps_graph.add(total_time, 1.0 / elapsed_time);
                 frame_free(frame);
             } else {
-                msg_hist.add("Failed to pop frame.");
-                continue;
+                slow_frames ++;
+            }
+
+            qlen_graph.add(total_time, decoder->get_queue_size());
+
+            glfwPollEvents();
+
+            if (ImGui::IsKeyPressed(ImGuiKey_A)) {
+                show_debug = !show_debug;
+            }
+
+            if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+                break;
             }
 
             ImGui_ImplVulkan_NewFrame();
             ImGui_ImplGlfw_NewFrame();
             ImGui::NewFrame();
-
 
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
             ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -233,25 +233,25 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
             if (show_debug) {
                 ImGui::SetNextWindowPos(ImVec2(10, 10));
-                ImVec2 dims = ImVec2(ImGui::GetIO().DisplaySize / 3);
+                ImVec2 dims = ImVec2((float) width / 3, (float) height / 3);
                 float nwidth = dims.x - 10;
-                float nheight = dims.y - 10;
+                float nheight = dims.y - 50;
 
                 ImGui::SetNextWindowSize(dims);
                 ImGui::Begin("Config", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
-
-
-                ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3);
-                fps_graph.draw("FPS", nwidth, nheight / 3);
-                qlen_graph.draw("frame_queue_size", nwidth, nheight / 3);
+                ImGui::Text("FPS: %f", ImGui::GetIO().Framerate);
+                ImGui::Text("Slow Frames: %ld", slow_frames);
+                ft_graph.draw("frame_decode_time (s)", nwidth, nheight / 3, total_time);
+                fps_graph.draw("frame_update_rate (fps)", nwidth, nheight / 3, total_time);
+                qlen_graph.draw("frame_queue_size (frames)", nwidth, nheight / 3, total_time);
 
                 ImGui::End();
 
                 nwidth = (float)width / 4;
                 nheight = (float) height / 3 * 2;
-                ImGui::SetNextWindowPos({ width - nwidth - 5, 0 });
-                ImGui::SetNextWindowSize({ nwidth + 5, nheight + 5});
+                ImGui::SetNextWindowPos({ width - nwidth - 25, 0 });
+                ImGui::SetNextWindowSize({ nwidth + 25, nheight + 25});
 
                 ImGui::Begin("History", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
@@ -270,7 +270,9 @@ int main_player(const char* movie, int flip_method, clip_t** sequences, int (*st
 
             interface.FrameRender(wd, draw_data);
             interface.FramePresent(wd);
-        }
+        } // else if (t1 < end - std::chrono::nanoseconds((int) (frametime_ns / 2))){
+        //     //std::this_thread::sleep_for(std::chrono::nanoseconds((int) (frametime / 2)));
+        // }
     }
 
     err = vkDeviceWaitIdle(interface.g_Device);

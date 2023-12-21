@@ -30,7 +30,6 @@ struct pipe_t {
 class Decoder
 {
     pipe_t pipe;
-
     decdata_f submit_data;
     addstr_f send_msg;
     addstr_f clip_changed;
@@ -61,6 +60,6 @@ class Decoder
     int get_width() {return width;};
     int get_height() {return height;};
     double get_framerate() {return framerate;};
-
+    int get_queue_size() {return frames.size_approx();}
     bool pop(frame_t &frame);
 };

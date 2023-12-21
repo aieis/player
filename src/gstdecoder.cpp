@@ -5,14 +5,15 @@
 #include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
 #include "gst/gstbus.h"
+#include "gst/gstclock.h"
 #include "gst/gstelement.h"
 #include "gst/gstelementfactory.h"
 #include "gst/gstformat.h"
+#include "gst/gstmessage.h"
 #include "gst/gstpad.h"
 #include "gst/gststructure.h"
 #include "gst/gstutils.h"
 
-#include <bits/chrono.h>
 #include <chrono>
 #include <cstdint>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 
 #include <gst/gstobject.h>
 #include <thread>
+
 
 clip_t find_next(clip_t** sequences, clip_t clip)
 {
@@ -35,12 +37,12 @@ clip_t find_next(clip_t** sequences, clip_t clip)
 }
 
 static std::string
-bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
+bus_to_text (GstMessage *msg)
 {
     switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_EOS:
         return "End of stream\n";
-        
+
     case GST_MESSAGE_ERROR: {
         gchar  *debug;
         GError *error;
@@ -50,14 +52,40 @@ bus_call (GstBus *bus, GstMessage *msg, gpointer    data)
 
         std::string err(error->message);
         g_error_free (error);
-        
-        return "Error: " + err;        
+
+        return "Error: " + err;
     }
+
     default:
         return GST_MESSAGE_TYPE_NAME(msg);
     }
-    
+
     return GST_MESSAGE_TYPE_NAME(msg);
+}
+
+void bus_handler(GstBus *bus, bool* run, std::function<void(std::string)> send_msg)
+{
+
+    while (*run) {
+        GstMessage* msg = gst_bus_timed_pop(bus, 5 * GST_SECOND);
+        if (msg) {
+            std::string msgval = bus_to_text(msg);
+            send_msg(msgval);
+        }
+    }
+}
+
+void bus_wait_msg(GstBus* bus, GstMessageType target, std::function<void(std::string)> send_msg)
+{
+    while (true) {
+        GstMessage* msg = gst_bus_pop(bus);
+        std::string msgval = bus_to_text(msg);
+        send_msg(msgval);
+
+        if (GST_MESSAGE_TYPE(msg) == target) {
+            return;
+        }
+    }
 }
 
 
@@ -142,20 +170,20 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     g_object_set(pipe.sink, "max-buffers", 2, NULL);
     g_object_set(pipe.sink, "drop", false, NULL);
     g_object_set(pipe.sink, "sync", false, NULL);
-     g_object_set(pipe.sink, "async", true, NULL);
-    
+    g_object_set(pipe.sink, "async", true, NULL);
+
     gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.dec, pipe.conv, pipe.sink, NULL);
     g_signal_connect(pipe.dec, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
 
-    
+
     gboolean link = gst_element_link(pipe.src, pipe.dec);
     g_assert(link);
-    
+
     GstCaps* caps = gst_caps_new_simple ("video/x-raw", "format", G_TYPE_STRING, "RGBA", NULL);
     link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
     g_assert(link);
-    
-    
+
+
     if (!link) {
         printf("Error when linking pipeline \n");
     }
@@ -165,9 +193,6 @@ Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t
     gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
 
     pipe.bus = gst_element_get_bus(pipe.pipeline);
-    //pipe.bus_watch_id = gst_bus_add_watch (pipe.bus, bus_call, NULL);
-    
-
 }
 
 Decoder::~Decoder()
@@ -215,10 +240,16 @@ void Decoder::play()
     int end = cclip.end;
     int frame = start;
 
-    double frame_time = ((double) start - 1) / framerate;
+    double start_ts = ((double) start - 1) / framerate;
+    //double end_ts = ((double) end - 1) / framerate;
     gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
-                      frame_time * GST_SECOND,
+                      start_ts * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+
+    //bus_wait_msg(pipe.bus, GST_MESSAGE_SEGMENT_START, send_msg);
+
+    bool run_threads = true;
+    std::thread bus_thread ([&]{ bus_handler(pipe.bus, &run_threads, send_msg);});
 
     running = true;
 
@@ -226,21 +257,15 @@ void Decoder::play()
     auto t1 = std::chrono::steady_clock::now();
     auto t2 = t1;
     double elapsed_time;
-    
+
     size_t frame_size = 4 * width * height * sizeof(uint8_t);
     while (running) {
-        GstMessage* msg = gst_bus_timed_pop(pipe.bus, 2);
-        if (msg != NULL) {
-            std::string msgval = bus_call(pipe.bus, msg, NULL);
-            send_msg(msgval);
-        }
-
         GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 33);
 
         if (!sample_frame) {
             continue;
         }
-        
+
         if (!sample_frame) {
             continue;
         }
@@ -269,19 +294,19 @@ void Decoder::play()
             cclip = find_next(sequences, cclip);
             start = cclip.start;
             frame = start;
-            frame_time = ((double) frame - 1)  / framerate;
-            
-            printf("Seeking frame %d => %f \n", start, frame_time);
+            start_ts = ((double) frame - 1)  / framerate;
+
+            printf("Seeking frame %d => %f \n", start, start_ts);
 
             if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
-                                   frame_time * GST_SECOND,
+                                   start_ts * GST_SECOND,
                                    GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
                 printf ("Seek failed!\n");
             }
-            
-            printf("Seeking successful %d => %f \n", start, frame_time);
+
+            printf("Seeking successful %d => %f \n", start, start_ts);
             clip_changed(std::to_string(cclip.address[0]) + "." + std::to_string(cclip.address[1]));
-            
+
             end = cclip.end;
         }
 
@@ -295,6 +320,9 @@ void Decoder::play()
 
         submit_data({total_time, elapsed_time, qsize});
     }
+
+    run_threads = false;
+    bus_thread.join();
 }
 
 void Decoder::stop()

@@ -19,5 +19,5 @@ class Graph {
  public:
     Graph(size_t isize, double ymin = 0.0, double ymax = 1.0);
     void add(double x, double y);
-    void draw(std::string pname, float width, float height);
+    void draw(std::string pname, float width, float height, double elapsed_time);
 };

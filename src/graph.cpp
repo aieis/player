@@ -29,14 +29,13 @@ void Graph::add(double x, double y)
     ys.push_back(y);
 }
 
-void Graph::draw(std::string pname, float width, float height)
+void Graph::draw(std::string pname, float width, float height, double elapsed_time)
 {
     auto lxs = xs;
     auto lys = ys;
 
-    double totalTime = 0;
-    totalTime = lxs[count - 1];
-
+    double totalTime = elapsed_time;
+    
     for (int j = 0; j < count; j++) {
         xs_rel[j] = lxs[j] - totalTime;
     }

@@ -24,9 +24,9 @@ void ListView::draw(std::string pname, float width, float height)
     }
 
     int current_item = 0;
-    double hit = (height - 5.0f) / ImGui::GetTextLineHeightWithSpacing();
-    ImGui::BeginListBox(pname.c_str(), ImVec2(width, height));
-    ImGui::ListBox(pname.c_str(), &current_item, citems.data(), citems.size(), hit);
-    
+    double hit = (height - 5.0f) / ImGui::GetTextLineHeightWithSpacing() - 1;
+    ImGui::Text("%s", pname.c_str());
+    ImGui::BeginListBox(("##" + pname).c_str(), ImVec2(width, height));
+    ImGui::ListBox(("##" + pname).c_str(), &current_item, citems.data(), citems.size(), hit);
     ImGui::EndListBox();
 }
