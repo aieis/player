@@ -136,8 +136,6 @@ void Decoder::reset() {
 
     pipe.sink = gst_bin_get_by_name(GST_BIN(pipe.pipeline), "sink");
 
-    // gst_element_set_state(pipe.pipeline, GST_STATE_READY);
-    // gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
     set_pipeline_state(pipe.pipeline, GST_STATE_PLAYING, 0.2*GST_SECOND);
 
     pipe.bus = gst_element_get_bus(pipe.pipeline);
@@ -272,7 +270,7 @@ void Decoder::play()
 
     while (running) {
         bus_handle_msgs(pipe.bus, send_msg);
-        GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 0.01 * GST_SECOND);
+        GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 0.33 * GST_SECOND);
 
         if (!sample_frame) {
             if (paused && frames.size_approx() < qmax * 0.75) {
@@ -284,7 +282,8 @@ void Decoder::play()
 
                 if (count > 2) {
                     spdlog::critical("Resetting the pipeline.");
-                    reset();
+		    count = 0;
+		    reset();
 		    start_ts = ((double)current_frame - 1) / framerate;
 		    spdlog::info("Seeking frame {} => {}", start, start_ts);
 
@@ -294,13 +293,12 @@ void Decoder::play()
 
                     GstSample* sample_frame = wait_for_sample(GST_APP_SINK(pipe.sink), start_ts);
                     if (!sample_frame) {
-                        spdlog::error("Fatal error encountered. Could not seek to previous point.");
-                        exit(1);
+                        spdlog::critical("Fatal error encountered. Could not seek to previous point.");
+			continue;
                     }
 
                     submit_frame(sample_frame);
                     gst_sample_unref(sample_frame);
-                    count = 0;
 
                 }
             }
