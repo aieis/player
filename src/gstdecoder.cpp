@@ -1,6 +1,7 @@
 #include "gstdecoder.h"
 
 #include "decoder.h"
+
 #include "gst/app/gstappsink.h"
 #include "gst/base/gstbasesink.h"
 #include "gst/gstbuffer.h"
@@ -14,6 +15,8 @@
 #include "gst/gststructure.h"
 #include "gst/gstutils.h"
 
+#include "spdlog/spdlog.h"
+
 #include <chrono>
 #include <cstdint>
 #include <stdio.h>
@@ -21,23 +24,11 @@
 
 #include <gst/gstobject.h>
 #include <thread>
+#include <unistd.h>
 
+static bool set_pipeline_state(GstElement* element, GstState target_state, int timeout_ms);
 
-clip_t find_next(clip_t** sequences, clip_t clip)
-{
-    int jind = rand() % clip.njumps;
-    int addr[2];
-    addr[0] = clip.addresses[jind * 2];
-    addr[1] = clip.addresses[jind * 2 + 1];
-     clip_t next = get_clip(sequences, &addr);
-
-    printf("Transition: (s%d.%d %d %d => s%d.%d %d %d)\n", clip.address[0], clip.address[1], clip.start, clip.end
-           , next.address[0], next.address[1], next.start, next.end);
-    return next;
-}
-
-static std::string
-bus_to_text (GstMessage *msg)
+static std::string bus_to_text (GstMessage *msg)
 {
     switch (GST_MESSAGE_TYPE (msg)) {
     case GST_MESSAGE_EOS:
@@ -63,136 +54,39 @@ bus_to_text (GstMessage *msg)
     return GST_MESSAGE_TYPE_NAME(msg);
 }
 
-void bus_handler(GstBus *bus, bool* run, std::function<void(std::string)> send_msg)
-{
-
-    while (*run) {
-        GstMessage* msg = gst_bus_timed_pop(bus, 5 * GST_SECOND);
-        if (msg) {
-            std::string msgval = bus_to_text(msg);
-            send_msg(msgval);
-        }
-    }
-}
-
-void bus_wait_msg(GstBus* bus, GstMessageType target, std::function<void(std::string)> send_msg)
+void bus_handle_msgs(GstBus* bus, std::function<void(std::string)> send_msg)
 {
     while (true) {
         GstMessage* msg = gst_bus_pop(bus);
-        std::string msgval = bus_to_text(msg);
-        send_msg(msgval);
 
-        if (GST_MESSAGE_TYPE(msg) == target) {
-            return;
-        }
+	if (!msg) {
+	    break;
+	}
+
+	std::string msgval = bus_to_text(msg);
+        send_msg(msgval);
+        gst_message_unref(msg);
     }
 }
 
 
-static void pad_added_handler(GstElement *src, GstPad *new_pad, pipe_t *data)
-{
-  GstPad *sink_pad = gst_element_get_static_pad(data->conv, "sink");
-  GstPadLinkReturn ret;
-  GstCaps *new_pad_caps = NULL;
-  GstStructure *new_pad_struct = NULL;
-  const gchar *new_pad_type = NULL;
-
-  g_print("Received new pad '%s' from '%s':\n", GST_PAD_NAME(new_pad), GST_ELEMENT_NAME(src));
-
-  /* If our converter is already linked, we have nothing to do here */
-  if (gst_pad_is_linked(sink_pad))
-  {
-    g_print("  We are already linked. Ignoring.\n");
-    goto exit;
-  }
-
-  /* Check the new pad's type */
-  new_pad_caps = gst_pad_get_current_caps(new_pad);
-  new_pad_struct = gst_caps_get_structure(new_pad_caps, 0);
-  new_pad_type = gst_structure_get_name(new_pad_struct);
-  if (!g_str_has_prefix(new_pad_type, "video/x-raw"))
-  {
-    g_print("  It has type '%s' which is not raw video. Ignoring.\n", new_pad_type);
-    goto exit;
-  }
-
-  /* Attempt the link */
-  ret = gst_pad_link(new_pad, sink_pad);
-  if (GST_PAD_LINK_FAILED(ret))
-  {
-    g_print("  Type is '%s' but link failed.\n", new_pad_type);
-  }
-  else
-  {
-    g_print("  Link succeeded (type '%s').\n", new_pad_type);
-  }
-
-exit:
-  /* Unreference the new pad's caps, if we got them */
-  if (new_pad_caps != NULL)
-    gst_caps_unref(new_pad_caps);
-
-  /* Unreference the sink pad */
-  gst_object_unref(sink_pad);
-}
-
-
-Decoder::Decoder(std::string movie, int flip_method, clip_t** isequences, addr_t i_start_address, size_t q_size, decdata_f i_submit_data, addstr_f i_msg_hist, addstr_f i_clip_hist)
+Decoder::Decoder(std::string i_movie, int flip_method, Base_SM* i_sm, size_t q_size, decdata_f i_submit_data, addstr_f i_msg_hist, addstr_f i_clip_hist)
 {
     width = 0;
     height = 0;
     running = false;
     format = "";
 
-    sequences = isequences;
+    movie = i_movie;
+    state_machine = i_sm;
     submit_data = i_submit_data;
     send_msg = i_msg_hist;
     clip_changed = i_clip_hist;
-    start_address = i_start_address;
 
     qmax = q_size;
     frames = moodycamel::BlockingReaderWriterQueue<frame_t>(qmax);
 
-
-    pipe.src = gst_element_factory_make("filesrc", "source0");
-    pipe.dec = gst_element_factory_make("decodebin", "decoder0");
-    pipe.conv = gst_element_factory_make("videoconvert", "conv0");
-    pipe.sink = gst_element_factory_make("appsink", "sink0");
-
-    pipe.pipeline = gst_pipeline_new ("decoder-pipe");
-
-    if (!pipe.pipeline || !pipe.src || !pipe.dec || !pipe.conv || !pipe.sink) {
-        printf("Not all elements could be created.\n");
-        return;
-    }
-
-    g_object_set(pipe.src, "location", movie.c_str(), NULL);
-    g_object_set(pipe.sink, "max-buffers", 2, NULL);
-    g_object_set(pipe.sink, "drop", false, NULL);
-    g_object_set(pipe.sink, "sync", false, NULL);
-    g_object_set(pipe.sink, "async", true, NULL);
-
-    gst_bin_add_many (GST_BIN (pipe.pipeline), pipe.src, pipe.dec, pipe.conv, pipe.sink, NULL);
-    g_signal_connect(pipe.dec, "pad-added", G_CALLBACK(pad_added_handler), &pipe);
-
-
-    gboolean link = gst_element_link(pipe.src, pipe.dec);
-    g_assert(link);
-
-    GstCaps* caps = gst_caps_new_simple ("video/x-raw", "format", G_TYPE_STRING, "RGBA", NULL);
-    link = gst_element_link_filtered(pipe.conv, pipe.sink, caps);
-    g_assert(link);
-
-
-    if (!link) {
-        printf("Error when linking pipeline \n");
-    }
-
-
-    gst_element_set_state(pipe.pipeline, GST_STATE_READY);
-    gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
-
-    pipe.bus = gst_element_get_bus(pipe.pipeline);
+    reset();
 }
 
 Decoder::~Decoder()
@@ -203,13 +97,57 @@ Decoder::~Decoder()
         gst_object_unref(pipe.pipeline);
         pipe.pipeline = NULL;
     }
+
+    frame_t frame;
+    while (spares.try_dequeue(frame)) {
+        frame_free(frame);
+    }
+}
+
+void Decoder::reset() {
+    if (pipe.pipeline != NULL) {
+	set_pipeline_state(pipe.pipeline, GST_STATE_NULL, 5000);
+        gst_object_unref(pipe.bus);
+        gst_object_unref(pipe.pipeline);
+        pipe.pipeline = NULL;
+    }
+
+#ifdef __aarch64__
+    const char *pipe_args_fmt =
+        "filesrc location=%s name=filesrc"
+        " ! qtdemux ! h264parse ! nvv4l2decoder"
+        " ! nvvidconv ! video/x-raw(memory:NVMM) ! nvvidconv ! video/x-raw,format=(string)RGBA"
+        " ! appsink name=sink async=true sync=false drop=false";
+#else
+
+    const char *pipe_args_fmt =
+        "filesrc location=%s name=filesrc"
+        " ! decodebin"
+        " ! videoconvert ! video/x-raw,format=(string)RGBA"
+        " ! appsink name=sink async=true sync=false drop=false";
+#endif
+
+    char pipe_args[2048];
+    sprintf(pipe_args, pipe_args_fmt, movie.c_str());
+
+    spdlog::info("{}", pipe_args);
+
+    pipe.pipeline = gst_parse_launch(pipe_args, NULL);
+
+    pipe.sink = gst_bin_get_by_name(GST_BIN(pipe.pipeline), "sink");
+
+    // gst_element_set_state(pipe.pipeline, GST_STATE_READY);
+    // gst_element_set_state(pipe.pipeline, GST_STATE_PLAYING);
+    set_pipeline_state(pipe.pipeline, GST_STATE_PLAYING, 0.2*GST_SECOND);
+
+    pipe.bus = gst_element_get_bus(pipe.pipeline);
 }
 
 bool Decoder::init()
 {
-    GstSample *sample = NULL;
+    GstSample *sample = gst_app_sink_pull_sample(GST_APP_SINK(pipe.sink));
     while (!sample) {
-        printf("sample is NULL\n");
+        spdlog::warn("sample is NULL");
         sample = gst_app_sink_pull_sample(GST_APP_SINK(pipe.sink));
     }
 
@@ -229,27 +167,97 @@ bool Decoder::init()
     format = std::string(format_local);
     gst_sample_unref(sample);
 
-    printf("Video properties: %dx%d %f FPS %s\n", width, height, framerate, format.c_str());
+    spdlog::info("Video properties: {}x{} {} FPS {}", width, height, framerate, format);
     return true;
+}
+
+static bool set_pipeline_state(GstElement* element, GstState target_state, int timeout_ms) {
+    auto now = std::chrono::steady_clock::now();
+    auto end = now + std::chrono::milliseconds(timeout_ms);
+    GstState current_state = GST_STATE_NULL, pending;
+    gst_element_set_state(element, target_state);
+
+    do {
+        gst_element_get_state(element, &current_state, &pending, 0.01 * GST_SECOND);
+        now = std::chrono::steady_clock::now();
+    } while (now < end && current_state != target_state);
+
+    return current_state == target_state;
+}
+
+static GstSample* wait_for_sample(GstAppSink* sink, double start_ts)
+{
+    int attempts = 0;
+    while (attempts < 25) {
+        GstSample* sample_frame = gst_app_sink_try_pull_sample(sink, 0.33 * GST_SECOND);
+        if (!sample_frame) {
+            spdlog::warn("Waiting for sample. Null received.");
+            attempts += 5;
+            continue;
+        }
+
+        GstBuffer *buffer =  gst_sample_get_buffer(sample_frame);
+        GstClockTime position = GST_BUFFER_TIMESTAMP(buffer);
+
+        spdlog::info("Current position: {} \t DesiredPosition {}", position, start_ts * GST_SECOND);
+
+        auto diff = position - start_ts * GST_SECOND;
+
+        if (diff < 0.01 * GST_SECOND && diff > -0.01 * GST_SECOND) {
+            return sample_frame;
+        }
+
+        gst_sample_unref(sample_frame);
+        attempts += 1;
+    }
+
+    return nullptr;
+}
+
+void Decoder::submit_frame(GstSample* sample_frame)
+{
+    size_t frame_size = 4 * width * height * sizeof(uint8_t);
+
+    GstBuffer *buffer =  gst_sample_get_buffer(sample_frame);
+    if (buffer) {
+        GstMapInfo map;
+        gst_buffer_map (buffer, &map, GST_MAP_READ);
+
+        frame_t frame;
+        if (!spares.try_dequeue(frame)) {
+            spdlog::warn("No spare frames, creating a new one.");
+            frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
+        }
+
+        memcpy(frame.data, map.data, frame_size);
+        gst_buffer_unmap(buffer, &map);
+        frames.enqueue(frame);
+    }
+
 }
 
 void Decoder::play()
 {
-    clip_t cclip = get_clip(sequences, start_address);
+    Clip cclip = state_machine->current();
     int start = cclip.start;
     int end = cclip.end;
-    int frame = start;
+    int current_frame = start;
 
     double start_ts = ((double) start - 1) / framerate;
-    //double end_ts = ((double) end - 1) / framerate;
+
     gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
                       start_ts * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
-    //bus_wait_msg(pipe.bus, GST_MESSAGE_SEGMENT_START, send_msg);
+    GstSample* sample_frame = wait_for_sample(GST_APP_SINK(pipe.sink), start_ts);
+    if (!sample_frame) {
+        spdlog::error("Fatal error encountered. Could not seek to start point.");
+        exit(1);
+    }
 
-    bool run_threads = true;
-    std::thread bus_thread ([&]{ bus_handler(pipe.bus, &run_threads, send_msg);});
+    submit_frame(sample_frame);
+    gst_sample_unref(sample_frame);
+
 
     running = true;
 
@@ -258,58 +266,52 @@ void Decoder::play()
     auto t2 = t1;
     double elapsed_time;
 
-    size_t frame_size = 4 * width * height * sizeof(uint8_t);
+    bool paused = false;
+
+    int count = 0;
+
     while (running) {
-        GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 33);
+        bus_handle_msgs(pipe.bus, send_msg);
+        GstSample *sample_frame = gst_app_sink_try_pull_sample(GST_APP_SINK(pipe.sink), 0.01 * GST_SECOND);
 
         if (!sample_frame) {
-            continue;
-        }
+            if (paused && frames.size_approx() < qmax * 0.75) {
+                set_pipeline_state(pipe.pipeline, GST_STATE_PLAYING, 100);
+                paused = false;
+            } else if (!paused){
+                spdlog::error("Failed to pull sample.");
+                count++;
 
-        if (!sample_frame) {
-            continue;
-        }
+                if (count > 2) {
+                    spdlog::critical("Resetting the pipeline.");
+                    reset();
+		    start_ts = ((double)current_frame - 1) / framerate;
+		    spdlog::info("Seeking frame {} => {}", start, start_ts);
 
-        GstBuffer *buffer =  gst_sample_get_buffer(sample_frame);
-        if (buffer) {
-            GstMapInfo map;
-            gst_buffer_map (buffer, &map, GST_MAP_READ);
+                    gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+                                      start_ts * GST_SECOND,
+                                      GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
-            frame_t frame;
-            frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
-            memcpy(frame.data, map.data, frame_size);
-            gst_buffer_unmap(buffer, &map);
+                    GstSample* sample_frame = wait_for_sample(GST_APP_SINK(pipe.sink), start_ts);
+                    if (!sample_frame) {
+                        spdlog::error("Fatal error encountered. Could not seek to previous point.");
+                        exit(1);
+                    }
 
-            while (frames.size_approx() > qmax) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                    submit_frame(sample_frame);
+                    gst_sample_unref(sample_frame);
+                    count = 0;
+
+                }
             }
 
-            frames.enqueue(frame);
+            continue;
         }
 
+	count = 0;
+
+        submit_frame(sample_frame);
         gst_sample_unref(sample_frame);
-
-        frame++;
-        if (frame  == end) {
-            cclip = find_next(sequences, cclip);
-            start = cclip.start;
-            frame = start;
-            start_ts = ((double) frame - 1)  / framerate;
-
-            printf("Seeking frame %d => %f \n", start, start_ts);
-
-            if (!gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
-                                   start_ts * GST_SECOND,
-                                   GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE)) {
-                printf ("Seek failed!\n");
-            }
-
-            printf("Seeking successful %d => %f \n", start, start_ts);
-            clip_changed(std::to_string(cclip.address[0]) + "." + std::to_string(cclip.address[1]));
-
-            end = cclip.end;
-        }
-
 
         t2 = std::chrono::steady_clock::now();
         elapsed_time = (double) std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
@@ -319,10 +321,32 @@ void Decoder::play()
         double qsize = frames.size_approx();
 
         submit_data({total_time, elapsed_time, qsize});
-    }
 
-    run_threads = false;
-    bus_thread.join();
+        current_frame++;
+
+        if (current_frame == end) {
+            cclip = state_machine->next();
+            start = cclip.start;
+            current_frame = start;
+            start_ts = ((double)current_frame - 1) / framerate;
+
+            spdlog::info("Seeking frame {} => {}", start, start_ts);
+
+            if (!gst_element_seek(pipe.pipeline, 1.0, GST_FORMAT_TIME,
+                                  GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
+                                  start_ts * GST_SECOND, GST_SEEK_TYPE_NONE,
+                                  GST_CLOCK_TIME_NONE)) {
+                spdlog::critical("Seek failed!");
+            }
+
+            spdlog::info("Seeking successful {} => {}", start, start_ts);
+            clip_changed(cclip.name);
+            end = cclip.end;
+        } else if (frames.size_approx() >= qmax * 1.25 ) {
+            set_pipeline_state(pipe.pipeline, GST_STATE_PAUSED, 100);
+            paused = true;
+        }
+    }
 }
 
 void Decoder::stop()
@@ -334,4 +358,8 @@ void Decoder::stop()
 bool Decoder::pop(frame_t &frame)
 {
     return frames.try_dequeue(frame);
+}
+
+bool Decoder::return_frame(frame_t frame) {
+    return spares.enqueue(frame);
 }

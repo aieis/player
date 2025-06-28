@@ -12,10 +12,11 @@
 #include "readerwriterqueue.h"
 
 #include "decoder.h"
-#include "parse_spec.h"
+#include "sm.h"
+
 
 struct pipe_t {
-    GstElement* pipeline;
+    GstElement* pipeline = NULL;
     GstElement* src;
     GstElement* dec;
     GstElement* flip;
@@ -33,10 +34,9 @@ class Decoder
     decdata_f submit_data;
     addstr_f send_msg;
     addstr_f clip_changed;
-    
-    
-    clip_t** sequences;
-    addr_t start_address;
+
+    std::string movie;
+    Base_SM* state_machine;
     int width;
     int height;
     double framerate;
@@ -46,20 +46,26 @@ class Decoder
 
     size_t qmax;
     moodycamel::BlockingReaderWriterQueue<frame_t> frames;
-    
+    moodycamel::BlockingReaderWriterQueue<frame_t> spares;
+
  public:
 
-    Decoder(std::string movie, int flip_mehtod, clip_t** clips, addr_t start_address, size_t q_size, decdata_f submit_data, addstr_f msg_hist, addstr_f clip_hist);
+    Decoder(std::string movie, int flip_mehtod, Base_SM* state_machine, size_t q_size, decdata_f submit_data, addstr_f msg_hist, addstr_f clip_hist);
     ~Decoder();
-    
+
+    void reset();
     bool init();
-    
+
     void play();
     void stop();
-    
+    void submit_frame(GstSample* sample_frame);
+
     int get_width() {return width;};
     int get_height() {return height;};
     double get_framerate() {return framerate;};
+
     int get_queue_size() {return frames.size_approx();}
+
     bool pop(frame_t &frame);
+    bool return_frame(frame_t frame);
 };

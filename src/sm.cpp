@@ -1,0 +1,79 @@
+#include "sm.h"
+
+
+Bird::Bird(std::string file_path) {
+    int curr_addr[2];
+    clips = parse_spec(file_path.c_str(), &curr_addr, &max_clips);
+    curr = get_clip(clips, &curr_addr);
+
+}
+
+Clip Bird::next() {
+    int jind = rand() % curr.njumps;
+    int addr[2];
+    addr[0] = curr.addresses[jind * 2];
+    addr[1] = curr.addresses[jind * 2 + 1];
+    clip_t next = get_clip(clips, &addr);
+
+    printf("Transition: (s%d.%d %d %d => s%d.%d %d %d)\n", curr.address[0],
+	   curr.address[1], curr.start, curr.end, next.address[0],
+	   next.address[1], next.start, next.end);
+
+    curr = next;
+
+    Clip clip;
+    clip.start = curr.start;
+    clip.end = curr.end;
+    clip.name = std::to_string(curr.address[0]) + "." + std::to_string(curr.address[1]);
+    return clip;
+}
+
+Clip Bird::current() {
+    Clip clip;
+    clip.start = curr.start;
+    clip.end = curr.end;
+    clip.name = std::to_string(curr.address[0]) + "." + std::to_string(curr.address[1]);
+    return clip;
+}
+
+
+Bird::~Bird() {
+    if (clips) {
+	for (int i = 0; i < max_clips; i++) {
+	    if (clips[i]->addresses) {
+		free(clips[i]->addresses);
+		clips[i]->addresses = nullptr;
+	    }
+	}
+
+	free(clips);
+	clips = nullptr;
+    }
+}
+
+
+BigBloom::BigBloom(std::string file_path) {
+    sensor_manager.start();
+    sm.parseFile(file_path);
+    sm.updateSegment();
+    sm.init = false;
+}
+
+Clip BigBloom::next() {
+    sm.setTargetPosition(sensor_manager.data.active);
+    sm.updateSegment();
+    return current();
+}
+
+Clip BigBloom::current() {
+    Clip clip;
+    clip.start = sm.currentSegment.startTime;
+    clip.end = sm.currentSegment.endTime;
+    clip.name = sm.currentSegment.name;
+    return clip;
+}
+
+
+BigBloom::~BigBloom() {
+
+}

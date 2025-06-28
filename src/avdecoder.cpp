@@ -1,7 +1,6 @@
 #include "avdecoder.h"
 
 #include <chrono>
-#include <libavcodec/codec_id.h>
 #include <libavutil/dict.h>
 #include <thread>
 extern "C" {
@@ -128,36 +127,35 @@ void AVDecoder::play() {
   printf("Cleanup of playback complete\n");
 }
 
-template<typename... Args> int logging(const char * f, Args... args) {
-  printf(f, args...);
-  return printf("\n");
-}
+#define PRINTFLN(...) do { printf(__VA_ARGS__); puts(""); } while (0)
+
 void AVDecoder::play2() {
 
     AVFormatContext *pFormatContext = avformat_alloc_context();
 
     if (!pFormatContext) {
-        logging("ERROR could not allocate memory for Format Context");
-        return;
+      PRINTFLN("ERROR could not allocate memory for Format Context");
+      return;
     }
 
-    logging("opening the input file (%s) and loading format (container) header",
-            filename.c_str());
+    PRINTFLN(
+        "opening the input file (%s) and loading format (container) header",
+        filename.c_str());
 
     if (avformat_open_input(&pFormatContext, filename.c_str(), NULL, NULL) != 0) {
-        logging("ERROR could not open the file");
-        return;
+      PRINTFLN("ERROR could not open the file");
+      return;
     }
 
-    logging("format %s, duration %lld us, bit_rate %lld",
-            pFormatContext->iformat->name, pFormatContext->duration,
-            pFormatContext->bit_rate);
+    PRINTFLN("format %s, duration %ld us, bit_rate %ld",
+             pFormatContext->iformat->name, pFormatContext->duration,
+             pFormatContext->bit_rate);
 
-    logging("finding stream info from format");
+    PRINTFLN("finding stream info from format");
 
     if (avformat_find_stream_info(pFormatContext, NULL) < 0) {
-        logging("ERROR could not get the stream info");
-        return;
+      PRINTFLN("ERROR could not get the stream info");
+      return;
     }
 
     const AVCodec *pCodec;
@@ -165,30 +163,30 @@ void AVDecoder::play2() {
     int video_stream_index = -1;
 
     // loop though all the streams and print its main information
-    for (int i = 0; i < pFormatContext->nb_streams; i++) {
+    for (unsigned int i = 0; i < pFormatContext->nb_streams; i++) {
         AVCodecParameters *pLocalCodecParameters = NULL;
         pLocalCodecParameters = pFormatContext->streams[i]->codecpar;
-        logging("AVStream->time_base before open coded %d/%d",
-                pFormatContext->streams[i]->time_base.num,
-                pFormatContext->streams[i]->time_base.den);
-        logging("AVStream->r_frame_rate before open coded %d/%d",
-                pFormatContext->streams[i]->r_frame_rate.num,
-                pFormatContext->streams[i]->r_frame_rate.den);
-        logging("AVStream->start_time %" PRId64,
-                pFormatContext->streams[i]->start_time);
-        logging("AVStream->duration %" PRId64,
-                pFormatContext->streams[i]->duration);
+        PRINTFLN("AVStream->time_base before open coded %d/%d",
+                 pFormatContext->streams[i]->time_base.num,
+                 pFormatContext->streams[i]->time_base.den);
+        PRINTFLN("AVStream->r_frame_rate before open coded %d/%d",
+                 pFormatContext->streams[i]->r_frame_rate.num,
+                 pFormatContext->streams[i]->r_frame_rate.den);
+        PRINTFLN("AVStream->start_time %" PRId64,
+                 pFormatContext->streams[i]->start_time);
+        PRINTFLN("AVStream->duration %" PRId64,
+                 pFormatContext->streams[i]->duration);
 
-        logging("finding the proper decoder (CODEC)");
+        PRINTFLN("finding the proper decoder (CODEC)");
 
         const AVCodec *pLocalCodec;
 
         pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
 
         if (pLocalCodec == NULL) {
-            logging("ERROR unsupported codec!");
-            // In this example if the codec is not found we just skip it
-            continue;
+          PRINTFLN("ERROR unsupported codec!");
+          // In this example if the codec is not found we just skip it
+          continue;
         }
 
         // when the stream is a video we store its index, codec parameters and codec
@@ -199,62 +197,63 @@ void AVDecoder::play2() {
                 pCodecParameters = pLocalCodecParameters;
             }
 
-            logging("Video Codec: resolution %d x %d", pLocalCodecParameters->width,
-                    pLocalCodecParameters->height);
+            PRINTFLN("Video Codec: resolution %d x %d",
+                     pLocalCodecParameters->width,
+                     pLocalCodecParameters->height);
         } else if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_AUDIO) {
-            logging("Audio Codec: %d channels, sample rate %d",
-                    pLocalCodecParameters->channels,
-                    pLocalCodecParameters->sample_rate);
+            // logging("Audio Codec: %d channels, sample rate %d",
+            //         pLocalCodecParameters->channels,
+            //         pLocalCodecParameters->sample_rate);
         }
 
         // print its name, id and bitrate
-        logging("\tCodec %s ID %d bit_rate %lld", pLocalCodec->name,
-                pLocalCodec->id, pLocalCodecParameters->bit_rate);
+        PRINTFLN("\tCodec %s ID %d bit_rate %ld", pLocalCodec->name,
+                 pLocalCodec->id, pLocalCodecParameters->bit_rate);
     }
 
     if (video_stream_index == -1) {
-        logging("File %s does not contain a video stream!", filename.c_str());
-        return;
+      PRINTFLN("File %s does not contain a video stream!", filename.c_str());
+      return;
     }
 
     AVCodecContext *pCodecContext = avcodec_alloc_context3(pCodec);
     if (!pCodecContext) {
-        logging("failed to allocated memory for AVCodecContext");
-        return;
+      PRINTFLN("failed to allocated memory for AVCodecContext");
+      return;
     }
 
     if (avcodec_parameters_to_context(pCodecContext, pCodecParameters) < 0) {
-        logging("failed to copy codec params to codec context");
-        return;
+      PRINTFLN("failed to copy codec params to codec context");
+      return;
     }
 
     if (avcodec_open2(pCodecContext, pCodec, NULL) < 0) {
-        logging("failed to open codec through avcodec_open2");
-        return;
+      PRINTFLN("failed to open codec through avcodec_open2");
+      return;
     }
 
     AVFrame *pFrame = av_frame_alloc();
     if (!pFrame) {
-        logging("failed to allocate memory for AVFrame");
-        return;
+      PRINTFLN("failed to allocate memory for AVFrame");
+      return;
     }
 
     AVPacket *pPacket = av_packet_alloc();
     if (!pPacket) {
-        logging("failed to allocate memory for AVPacket");
-        return;
+      PRINTFLN("failed to allocate memory for AVPacket");
+      return;
     }
 
 
     running = true;
     while (running) {
         if(av_read_frame(pFormatContext, pPacket) < 0) {
-              logging("av_read_frame failure");
-              break;
+          PRINTFLN("av_read_frame failure");
+          break;
         }
         
         if (avcodec_send_packet(pCodecContext, pPacket)) {
-            logging("avcodec_send_packet failure!");
+          PRINTFLN("avcodec_send_packet failure!");
         }
         
         decode(pCodecContext, pFrame, pPacket);

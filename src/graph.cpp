@@ -36,7 +36,7 @@ void Graph::draw(std::string pname, float width, float height, double elapsed_ti
 
     double totalTime = elapsed_time;
     
-    for (int j = 0; j < count; j++) {
+    for (size_t j = 0; j < count; j++) {
         xs_rel[j] = lxs[j] - totalTime;
     }
 

@@ -2,11 +2,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
+
 #include <vulkan/vulkan_core.h>
+#include "spdlog/spdlog.h"
+
+
 
 #include "imgui_impl_vulkan.h"
 
+unsigned int debug_report(unsigned int, VkDebugReportObjectTypeEXT,
+                          long unsigned int, long unsigned int, int,
+                          const char * val1, const char * val2, void *) {
 
+    std::cerr << val1 << " " << val2 << std::endl;
+
+    return 1;
+}
 
 static void check_vk_result(VkResult err)
 {
@@ -75,20 +87,24 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
         err = vkEnumeratePhysicalDevices(g_Instance, &gpu_count, gpus);
         check_vk_result(err);
 
-        // If a number >1 of GPUs got reported, find discrete GPU if present, or use first one available. This covers
+	// If a number >1 of GPUs got reported, find discrete GPU if present, or use first one available. This covers
         // most common cases (multi-gpu/integrated+dedicated graphics). Handling more complicated setups (multiple
         // dedicated GPUs) is out of scope of this sample.
+	printf("\nPhysical Devices (%d):\n", gpu_count);
         int use_gpu = 0;
         for (int i = 0; i < (int)gpu_count; i++)
-            {
-                VkPhysicalDeviceProperties properties;
-                vkGetPhysicalDeviceProperties(gpus[i], &properties);
-                if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-                    {
-                        use_gpu = i;
-                        break;
-                    }
-            }
+	{
+	    VkPhysicalDeviceProperties properties;
+	    vkGetPhysicalDeviceProperties(gpus[i], &properties);
+
+	    bool dedicated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+	    printf("\t[%d] %s\n", (int) dedicated, properties.deviceName);
+
+	    if (dedicated)
+	    {
+		use_gpu = i;
+	    }
+	}
 
         g_PhysicalDevice = gpus[use_gpu];
         free(gpus);
@@ -101,11 +117,13 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
         VkQueueFamilyProperties* queues = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * count);
         vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &count, queues);
         for (uint32_t i = 0; i < count; i++)
-            if (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-                {
-                    g_QueueFamily = i;
-                    break;
-                }
+	{
+	    if (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+	    {
+		g_QueueFamily = i;
+		break;
+	    }
+	}
         free(queues);
         IM_ASSERT(g_QueueFamily != (uint32_t)-1);
     }
@@ -179,17 +197,44 @@ void VulkanInterface::SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceK
     wd->SurfaceFormat = ImGui_ImplVulkanH_SelectSurfaceFormat(g_PhysicalDevice, wd->Surface, requestSurfaceImageFormat, (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat), requestSurfaceColorSpace);
 
     // Select Present Mode
-#ifdef IMGUI_UNLIMITED_FRAME_RATE
+// #ifdef IMGUI_UNLIMITED_FRAME_RATE
     VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR };
-#else
-    VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_FIFO_KHR };
-#endif
+// #else
+    //VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_FIFO_KHR };
+    //#endif
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, wd->Surface, &present_modes[0], IM_ARRAYSIZE(present_modes));
-    //printf("[vulkan] Selected PresentMode = %d\n", wd->PresentMode);
+    printf("[vulkan] Selected PresentMode = %d.\n\tImage Count = %d\n", wd->PresentMode, g_MinImageCount);
 
     // Create SwapChain, RenderPass, Framebuffer, etc.
     IM_ASSERT(g_MinImageCount >= 2);
     ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, wd, g_QueueFamily, g_Allocator, width, height, g_MinImageCount);
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = g_QueueFamily;
+    vkCreateCommandPool(g_Device, &poolInfo, g_Allocator, &m_SpareCommandPool);
+
+    std::vector<VkCommandBuffer> buffers;
+    buffers.resize(10);
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_SpareCommandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 10;
+    vkAllocateCommandBuffers(g_Device, &allocInfo, buffers.data());
+
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    
+    for (int i = 0; i < 10; i++) {
+	SpareCommandBuffer buffer;
+	buffer.buffer = buffers[i];
+	vkCreateFence(g_Device, &fenceInfo, g_Allocator, &buffer.fence);
+	m_SpareCommandBuffers.push_back(buffer);
+    }
 }
 
 void VulkanInterface::CleanupVulkan()
@@ -202,6 +247,15 @@ void VulkanInterface::CleanupVulkan()
     vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
 #endif // IMGUI_VULKAN_DEBUG_REPORT
 
+    CollectCommandBuffers();
+
+    for (auto spare_buffer: m_SpareCommandBuffers) {
+	vkFreeCommandBuffers(g_Device, m_SpareCommandPool, 1, &spare_buffer.buffer);
+	vkDestroyFence(g_Device, spare_buffer.fence, g_Allocator);
+    }
+
+    vkDestroyCommandPool(g_Device, m_SpareCommandPool, g_Allocator);
+    
     vkDestroyDevice(g_Device, g_Allocator);
     vkDestroyInstance(g_Instance, g_Allocator);
 }
@@ -332,13 +386,23 @@ uint32_t VulkanInterface::findMemoryType(uint32_t type_filter, VkMemoryPropertyF
     return 0xFFFFFFFF; // Unable to find memoryType
 }
 
+void VulkanInterface::CollectCommandBuffers() {
+    for (int i = m_InFlightCommandBuffers.size() - 1; i >= 0; i--) {
+	VkResult res = vkGetFenceStatus(g_Device, m_InFlightCommandBuffers[i].fence);
+	if (res == VK_SUCCESS) {
+	    m_SpareCommandBuffers.push_back(m_InFlightCommandBuffers[i]);
+	    m_InFlightCommandBuffers.erase(m_InFlightCommandBuffers.begin() + i);
+	}
+    }
+}
+
 // Helper function to load an image with common settings and return a MyTextureData with a VkDescriptorSet as a sort of Vulkan pointer
 bool VulkanInterface::LoadTextureFromData(TextureData* tex_data, void* image_data, int width, int height)
 {
     tex_data->Channels = 4;
     tex_data->Width = width;
     tex_data->Height = height;
-    
+
     if (image_data == NULL)
         return false;
 
@@ -444,9 +508,8 @@ bool VulkanInterface::LoadTextureFromData(TextureData* tex_data, void* image_dat
         range[0].size = image_size;
         err = vkFlushMappedMemoryRanges(g_Device, 1, range);
         check_vk_result(err);
-        //vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
     }
-    
+
     // Create a command buffer that will perform following steps when hit in the command queue.
     // TODO: this works in the example, but may need input if this is an acceptable way to access the pool/create the command buffer.
     VkCommandPool command_pool = g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
@@ -525,45 +588,39 @@ bool VulkanInterface::LoadTextureFromData(TextureData* tex_data, void* image_dat
 
 void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int image_size)
 {
+    CollectCommandBuffers();
+
     VkResult err;
-    // void* map = NULL;
-    // VkResult err = vkMapMemory(g_Device, tex_data->UploadBufferMemory, 0, image_size, 0, &map);
-    // check_vk_result(err);
     memcpy(tex_data->map, image_data, image_size);
-    // VkMappedMemoryRange range[1] = {};
-    // range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    // range[0].memory = tex_data->UploadBufferMemory;
-    // range[0].size = image_size;
-    // err = vkFlushMappedMemoryRanges(g_Device, 1, range);
-    // check_vk_result(err);
-    //vkUnmapMemory(g_Device, tex_data->UploadBufferMemory);
 
+    if (m_SpareCommandBuffers.size() == 0) {
+	spdlog::critical("No spare command buffers.");
+	return;
+    }
 
-    VkCommandPool command_pool = g_MainWindowData.Frames[g_MainWindowData.FrameIndex].CommandPool;
-    VkCommandBuffer command_buffer;
+    SpareCommandBuffer spare_buffer = m_SpareCommandBuffers.back();
+    m_SpareCommandBuffers.pop_back();
+    VkCommandBuffer command_buffer = spare_buffer.buffer;
+    vkResetCommandBuffer(command_buffer, 0);
+
+    
     {
-        VkCommandBufferAllocateInfo alloc_info{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandPool = command_pool;
-        alloc_info.commandBufferCount = 1;
-
-        err = vkAllocateCommandBuffers(g_Device, &alloc_info, &command_buffer);
-        check_vk_result(err);
-
         VkCommandBufferBeginInfo begin_info = {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        begin_info.flags |= VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
         err = vkBeginCommandBuffer(command_buffer, &begin_info);
         check_vk_result(err);
     }
+
+    
 
     // Copy to Image
     {
         VkImageMemoryBarrier copy_barrier[1] = {};
         copy_barrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        copy_barrier[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         copy_barrier[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        copy_barrier[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        copy_barrier[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         copy_barrier[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         copy_barrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         copy_barrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -593,7 +650,7 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         use_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         use_barrier[0].subresourceRange.levelCount = 1;
         use_barrier[0].subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, use_barrier);
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, use_barrier); 
     }
 
     // End command buffer
@@ -604,10 +661,10 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         end_info.pCommandBuffers = &command_buffer;
         err = vkEndCommandBuffer(command_buffer);
         check_vk_result(err);
-        err = vkQueueSubmit(g_Queue, 1, &end_info, VK_NULL_HANDLE);
-        check_vk_result(err);
-        // err = vkDeviceWaitIdle(g_Device);
-        // check_vk_result(err);
+        err = vkQueueSubmit(g_Queue, 1, &end_info, spare_buffer.fence);
+	check_vk_result(err);
+
+	m_InFlightCommandBuffers.push_back(spare_buffer);
     }
 
 }
@@ -624,5 +681,3 @@ void VulkanInterface::RemoveTexture(TextureData* tex_data)
     vkFreeMemory(g_Device, tex_data->ImageMemory, nullptr);
     ImGui_ImplVulkan_RemoveTexture(tex_data->DS);
 }
-
-

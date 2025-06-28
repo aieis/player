@@ -1,23 +1,23 @@
-GLFWINC = $(shell pkg-config --cflags glfw3) 
+GLFWINC = $(shell pkg-config --cflags glfw3)
 GLFWLIB = $(shell pkg-config --libs glfw3)
-GLIBINC = $(shell pkg-config --cflags glib-2.0) 
+GLIBINC = $(shell pkg-config --cflags glib-2.0)
 GLIBLIB = $(shell pkg-config --libs glib-2.0)
 GSTINC = $(shell pkg-config --cflags gstreamer-1.0)
 GSTLIB = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0)
 GTKINC =  $(shell pkg-config --cflags gtk+-2.0)
 GTKLIB =  $(shell pkg-config --libs gtk+-2.0)
-AVINC = $(shell pkg-config --cflags libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)	
+AVINC = $(shell pkg-config --cflags libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
 AVLIB = $(shell pkg-config --libs libavcodec libavdevice libavfilter libavformat libavcodec libswresample libswscale libavutil)
-EXINC = $(shell pkg-config --cflags vulkan)
-EXLIB = $(shell pkg-config --libs vulkan)
+EXINC = $(shell pkg-config --cflags vulkan spdlog)
+EXLIB = $(shell pkg-config --libs vulkan spdlog)
 
 INCS = $(GLFWINC) $(GLIBINC) $(GSTINC) $(AVINC) $(EXINC) -I./extern/imgui -I./extern/implot -I./extern/readerwriterqueue -I./extern/argparse
 LIBS = $(GLFWLIB) $(GLIBLIB) $(GSTLIB) $(AVLIB) $(EXLIB)
 
-CC = gcc -Os -g
-LD = gcc -Os -g
-CFLAGS= $(INCS) -pedantic -Wall -std=c++17
-LDFLAGS=$(LIBS) -lm -lGL -lstdc++
+CC = gcc -O0 -g
+LD = gcc -O0 -g
+CFLAGS= $(INCS) -pedantic -Wall -std=c++2a
+LDFLAGS=$(LIBS) -lm -lGL -lstdc++ -lpthread -lrt
 
 SRCDIR	= src
 OBJDIR	= obj

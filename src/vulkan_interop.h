@@ -1,3 +1,4 @@
+#include <vector>
 #include <vulkan/vulkan.h>
 #include <stdlib.h>
 
@@ -23,6 +24,11 @@ struct TextureData
     TextureData() { memset(this, 0, sizeof(*this)); }
 };
 
+struct SpareCommandBuffer {
+    VkFence fence;
+    VkCommandBuffer buffer;
+};
+
 class VulkanInterface {
 
  public:
@@ -32,6 +38,7 @@ class VulkanInterface {
     VkDevice                 g_Device = VK_NULL_HANDLE;
     uint32_t                 g_QueueFamily = (uint32_t)-1;
     VkQueue                  g_Queue = VK_NULL_HANDLE;
+    VkQueue                  g_TransferQueue = VK_NULL_HANDLE;
     VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
     VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
     VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
@@ -40,7 +47,14 @@ class VulkanInterface {
     int                      g_MinImageCount = 2;
     bool                     g_SwapChainRebuild = false;
 
+
+    VkCommandPool m_SpareCommandPool;
+    std::vector<SpareCommandBuffer> m_SpareCommandBuffers;
+    std::vector<SpareCommandBuffer> m_InFlightCommandBuffers;
+    
 public:
+
+    void CollectCommandBuffers();
     ImGui_ImplVulkan_InitInfo makeInfo();
     void SetupVulkan(const char** extensions, uint32_t extensions_count);
     void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height);
