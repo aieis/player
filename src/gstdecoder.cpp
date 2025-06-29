@@ -92,8 +92,9 @@ Decoder::Decoder(std::string i_movie, int flip_method, Base_SM* i_sm, size_t q_s
 Decoder::~Decoder()
 {
     if (pipe.pipeline != NULL) {
-        //g_source_remove (pipe.bus_watch_id);
+        set_pipeline_state(pipe.pipeline, GST_STATE_NULL, 5000);
         gst_object_unref(pipe.bus);
+        gst_object_unref(pipe.sink);
         gst_object_unref(pipe.pipeline);
         pipe.pipeline = NULL;
     }
@@ -106,8 +107,9 @@ Decoder::~Decoder()
 
 void Decoder::reset() {
     if (pipe.pipeline != NULL) {
-	set_pipeline_state(pipe.pipeline, GST_STATE_NULL, 5000);
+        set_pipeline_state(pipe.pipeline, GST_STATE_NULL, 5000);
         gst_object_unref(pipe.bus);
+        gst_object_unref(pipe.sink);
         gst_object_unref(pipe.pipeline);
         pipe.pipeline = NULL;
     }
@@ -285,7 +287,7 @@ void Decoder::play()
 		    count = 0;
 		    reset();
 		    start_ts = ((double)current_frame - 1) / framerate;
-		    spdlog::info("Seeking frame {} => {}", start, start_ts);
+		    spdlog::info("Seeking frame {} => {}", current_frame, start_ts);
 
                     gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
                                       start_ts * GST_SECOND,
