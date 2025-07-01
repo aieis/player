@@ -93,7 +93,7 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine, bool
     int max_graph_elems = (int) (framerate * 2 * 60) * 10;
 
     Graph ft_graph (max_graph_elems, 0, 0.5);
-    Graph fps_graph (max_graph_elems, 0, 70);
+    Graph fps_graph (max_graph_elems, 0, 140);
     Graph qlen_graph (max_graph_elems, 0, q_size * 1.5);
 
     decdata_f ftdata = [&](DecoderData p) {
@@ -156,7 +156,7 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine, bool
     char* init_data = reinterpret_cast<char*>(malloc(image_size));
     memset(init_data, 0, image_size);
 
-    constexpr int NUM_TEXTURES = 4;
+    constexpr int NUM_TEXTURES = 10;
     int current_texture = NUM_TEXTURES;
     TextureData frame_textures [NUM_TEXTURES];
 

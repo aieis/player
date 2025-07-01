@@ -12,7 +12,7 @@
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
 {
         (void)flags; (void)object; (void)location; (void)messageCode; (void)pUserData; (void)pLayerPrefix; // Unused arguments
-        spdlog::warn("[vulkan] Debug report from ObjectType: {}\n\tMessage: {}", objectType, pMessage);
+        spdlog::warn("[vulkan] Debug report from ObjectType: {}\n\tMessage: {}", (int) objectType, pMessage);
         return VK_FALSE;
 }
 
