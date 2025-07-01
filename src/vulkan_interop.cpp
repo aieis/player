@@ -7,30 +7,30 @@
 #include <vulkan/vulkan_core.h>
 #include "spdlog/spdlog.h"
 
-
-
 #include "imgui_impl_vulkan.h"
 
-unsigned int debug_report(unsigned int, VkDebugReportObjectTypeEXT,
-                          long unsigned int, long unsigned int, int,
-                          const char * val1, const char * val2, void *) {
-
-    std::cerr << val1 << " " << val2 << std::endl;
-
-    return 1;
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
+{
+        (void)flags; (void)object; (void)location; (void)messageCode; (void)pUserData; (void)pLayerPrefix; // Unused arguments
+        spdlog::warn("[vulkan] Debug report from ObjectType: {}\n\tMessage: {}", objectType, pMessage);
+        return VK_FALSE;
 }
+
+
 
 static void check_vk_result(VkResult err)
 {
-    if (err == 0)
-        return;
-    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
-    if (err < 0)
+    if (err < 0) {
+        spdlog::critical("[vulkan] Error: VkResult = {}", (int)err);
         abort();
+    }
 }
-void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_count)
+
+void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_count, bool debug)
 {
     VkResult err;
+
+    m_Debug = debug;
 
     // Create Vulkan Instance
     {
@@ -38,42 +38,43 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
         create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         create_info.enabledExtensionCount = extensions_count;
         create_info.ppEnabledExtensionNames = extensions;
-#ifdef IMGUI_VULKAN_DEBUG_REPORT
-        // Enabling validation layers
-        const char* layers[] = { "VK_LAYER_KHRONOS_validation" };
-        create_info.enabledLayerCount = 1;
-        create_info.ppEnabledLayerNames = layers;
 
-        // Enable debug report extension (we need additional storage, so we duplicate the user array to add our new extension to it)
-        const char** extensions_ext = (const char**)malloc(sizeof(const char*) * (extensions_count + 1));
-        memcpy(extensions_ext, extensions, extensions_count * sizeof(const char*));
-        extensions_ext[extensions_count] = "VK_EXT_debug_report";
-        create_info.enabledExtensionCount = extensions_count + 1;
-        create_info.ppEnabledExtensionNames = extensions_ext;
 
-        // Create Vulkan Instance
-        err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
-        check_vk_result(err);
-        free(extensions_ext);
+        if (m_Debug) {
+	    spdlog::info("Adding vulkan debug layers.");
+            const char* layers[] = { "VK_LAYER_KHRONOS_validation" };
+            create_info.enabledLayerCount = 1;
+            create_info.ppEnabledLayerNames = layers;
 
-        // Get the function pointer (required for any extensions)
-        auto vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
-        IM_ASSERT(vkCreateDebugReportCallbackEXT != NULL);
+            // Enable debug report extension (we need additional storage, so we duplicate the user array to add our new extension to it)
+            const char** extensions_ext = (const char**)malloc(sizeof(const char*) * (extensions_count + 1));
+            memcpy(extensions_ext, extensions, extensions_count * sizeof(const char*));
+            extensions_ext[extensions_count] = "VK_EXT_debug_report";
+            create_info.enabledExtensionCount = extensions_count + 1;
+            create_info.ppEnabledExtensionNames = extensions_ext;
 
-        // Setup the debug report callback
-        VkDebugReportCallbackCreateInfoEXT debug_report_ci = {};
-        debug_report_ci.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
-        debug_report_ci.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
-        debug_report_ci.pfnCallback = debug_report;
-        debug_report_ci.pUserData = NULL;
-        err = vkCreateDebugReportCallbackEXT(g_Instance, &debug_report_ci, g_Allocator, &g_DebugReport);
-        check_vk_result(err);
-#else
-        // Create Vulkan Instance without any debug feature
-        err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
-        check_vk_result(err);
-        IM_UNUSED(g_DebugReport);
-#endif
+            // Create Vulkan Instance
+            err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
+            check_vk_result(err);
+            free(extensions_ext);
+
+            // Get the function pointer (required for any extensions)
+            auto vkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkCreateDebugReportCallbackEXT");
+            IM_ASSERT(vkCreateDebugReportCallbackEXT != NULL);
+
+            // Setup the debug report callback
+            VkDebugReportCallbackCreateInfoEXT debug_report_ci = {};
+            debug_report_ci.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+            debug_report_ci.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+            debug_report_ci.pfnCallback = debug_report;
+            debug_report_ci.pUserData = NULL;
+            err = vkCreateDebugReportCallbackEXT(g_Instance, &debug_report_ci, g_Allocator, &g_DebugReport);
+            check_vk_result(err);
+        } else {
+            err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
+            check_vk_result(err);
+            IM_UNUSED(g_DebugReport);
+        }
     }
 
     // Select GPU
@@ -87,24 +88,21 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
         err = vkEnumeratePhysicalDevices(g_Instance, &gpu_count, gpus);
         check_vk_result(err);
 
-	// If a number >1 of GPUs got reported, find discrete GPU if present, or use first one available. This covers
-        // most common cases (multi-gpu/integrated+dedicated graphics). Handling more complicated setups (multiple
-        // dedicated GPUs) is out of scope of this sample.
-	printf("\nPhysical Devices (%d):\n", gpu_count);
+        printf("\nPhysical Devices (%d):\n", gpu_count);
         int use_gpu = 0;
         for (int i = 0; i < (int)gpu_count; i++)
-	{
-	    VkPhysicalDeviceProperties properties;
-	    vkGetPhysicalDeviceProperties(gpus[i], &properties);
+        {
+            VkPhysicalDeviceProperties properties;
+            vkGetPhysicalDeviceProperties(gpus[i], &properties);
 
-	    bool dedicated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-	    printf("\t[%d] %s\n", (int) dedicated, properties.deviceName);
+            bool dedicated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+            printf("\t[%d] %s\n", (int) dedicated, properties.deviceName);
 
-	    if (dedicated)
-	    {
-		use_gpu = i;
-	    }
-	}
+            if (dedicated)
+            {
+                use_gpu = i;
+            }
+        }
 
         g_PhysicalDevice = gpus[use_gpu];
         free(gpus);
@@ -117,13 +115,13 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
         VkQueueFamilyProperties* queues = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * count);
         vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &count, queues);
         for (uint32_t i = 0; i < count; i++)
-	{
-	    if (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-	    {
-		g_QueueFamily = i;
-		break;
-	    }
-	}
+        {
+            if (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            {
+                g_QueueFamily = i;
+                break;
+            }
+        }
         free(queues);
         IM_ASSERT(g_QueueFamily != (uint32_t)-1);
     }
@@ -176,9 +174,8 @@ void VulkanInterface::SetupVulkan(const char** extensions, uint32_t extensions_c
     }
 }
 
-// All the ImGui_ImplVulkanH_XXX structures/functions are optional helpers used by the demo.
-// Your real engine/app may not use them.
-void VulkanInterface::SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height)
+
+void VulkanInterface::SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height, bool vsync)
 {
     wd->Surface = surface;
 
@@ -196,13 +193,21 @@ void VulkanInterface::SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceK
     const VkColorSpaceKHR requestSurfaceColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
     wd->SurfaceFormat = ImGui_ImplVulkanH_SelectSurfaceFormat(g_PhysicalDevice, wd->Surface, requestSurfaceImageFormat, (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat), requestSurfaceColorSpace);
 
-    // Select Present Mode
-// #ifdef IMGUI_UNLIMITED_FRAME_RATE
-    VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR };
-// #else
-    //VkPresentModeKHR present_modes[] = { VK_PRESENT_MODE_FIFO_KHR };
-    //#endif
-    wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, wd->Surface, &present_modes[0], IM_ARRAYSIZE(present_modes));
+
+    VkPresentModeKHR present_modes[3];
+    int present_modes_count = 0;
+    if (vsync) {
+	spdlog::info("VSync enabled.");
+        present_modes[0] = VK_PRESENT_MODE_FIFO_KHR;
+	present_modes_count = 1;
+    } else {
+        VkPresentModeKHR present_modes_n[] = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR };
+        memcpy(present_modes, present_modes_n, sizeof(present_modes_n));
+        present_modes_count = 3;
+    }
+
+
+    wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, wd->Surface, &present_modes[0], present_modes_count);
     printf("[vulkan] Selected PresentMode = %d.\n\tImage Count = %d\n", wd->PresentMode, g_MinImageCount);
 
     // Create SwapChain, RenderPass, Framebuffer, etc.
@@ -228,12 +233,12 @@ void VulkanInterface::SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceK
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    
+
     for (int i = 0; i < 10; i++) {
-	SpareCommandBuffer buffer;
-	buffer.buffer = buffers[i];
-	vkCreateFence(g_Device, &fenceInfo, g_Allocator, &buffer.fence);
-	m_SpareCommandBuffers.push_back(buffer);
+        SpareCommandBuffer buffer;
+        buffer.buffer = buffers[i];
+        vkCreateFence(g_Device, &fenceInfo, g_Allocator, &buffer.fence);
+        m_SpareCommandBuffers.push_back(buffer);
     }
 }
 
@@ -241,21 +246,20 @@ void VulkanInterface::CleanupVulkan()
 {
     vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
 
-#ifdef IMGUI_VULKAN_DEBUG_REPORT
-    // Remove the debug report callback
-    auto vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkDestroyDebugReportCallbackEXT");
-    vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
-#endif // IMGUI_VULKAN_DEBUG_REPORT
+    if (m_Debug) {
+        auto vkDestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(g_Instance, "vkDestroyDebugReportCallbackEXT");
+        vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
+    }
 
     CollectCommandBuffers();
 
     for (auto spare_buffer: m_SpareCommandBuffers) {
-	vkFreeCommandBuffers(g_Device, m_SpareCommandPool, 1, &spare_buffer.buffer);
-	vkDestroyFence(g_Device, spare_buffer.fence, g_Allocator);
+        vkFreeCommandBuffers(g_Device, m_SpareCommandPool, 1, &spare_buffer.buffer);
+        vkDestroyFence(g_Device, spare_buffer.fence, g_Allocator);
     }
 
     vkDestroyCommandPool(g_Device, m_SpareCommandPool, g_Allocator);
-    
+
     vkDestroyDevice(g_Device, g_Allocator);
     vkDestroyInstance(g_Instance, g_Allocator);
 }
@@ -388,11 +392,11 @@ uint32_t VulkanInterface::findMemoryType(uint32_t type_filter, VkMemoryPropertyF
 
 void VulkanInterface::CollectCommandBuffers() {
     for (int i = m_InFlightCommandBuffers.size() - 1; i >= 0; i--) {
-	VkResult res = vkGetFenceStatus(g_Device, m_InFlightCommandBuffers[i].fence);
-	if (res == VK_SUCCESS) {
-	    m_SpareCommandBuffers.push_back(m_InFlightCommandBuffers[i]);
-	    m_InFlightCommandBuffers.erase(m_InFlightCommandBuffers.begin() + i);
-	}
+        VkResult res = vkGetFenceStatus(g_Device, m_InFlightCommandBuffers[i].fence);
+        if (res == VK_SUCCESS) {
+            m_SpareCommandBuffers.push_back(m_InFlightCommandBuffers[i]);
+            m_InFlightCommandBuffers.erase(m_InFlightCommandBuffers.begin() + i);
+        }
     }
 }
 
@@ -594,16 +598,17 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
     memcpy(tex_data->map, image_data, image_size);
 
     if (m_SpareCommandBuffers.size() == 0) {
-	spdlog::critical("No spare command buffers.");
-	return;
+        spdlog::critical("No spare command buffers.");
+        return;
     }
 
     SpareCommandBuffer spare_buffer = m_SpareCommandBuffers.back();
     m_SpareCommandBuffers.pop_back();
     VkCommandBuffer command_buffer = spare_buffer.buffer;
     vkResetCommandBuffer(command_buffer, 0);
+    vkResetFences(g_Device, 1, &spare_buffer.fence);
 
-    
+
     {
         VkCommandBufferBeginInfo begin_info = {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -612,7 +617,7 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         check_vk_result(err);
     }
 
-    
+
 
     // Copy to Image
     {
@@ -628,7 +633,7 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         copy_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copy_barrier[0].subresourceRange.levelCount = 1;
         copy_barrier[0].subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, copy_barrier);
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, copy_barrier);
 
         VkBufferImageCopy region = {};
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -650,7 +655,7 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         use_barrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         use_barrier[0].subresourceRange.levelCount = 1;
         use_barrier[0].subresourceRange.layerCount = 1;
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, use_barrier); 
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, use_barrier);
     }
 
     // End command buffer
@@ -662,9 +667,9 @@ void VulkanInterface::UpdateTexture(TextureData* tex_data, void* image_data, int
         err = vkEndCommandBuffer(command_buffer);
         check_vk_result(err);
         err = vkQueueSubmit(g_Queue, 1, &end_info, spare_buffer.fence);
-	check_vk_result(err);
+        check_vk_result(err);
 
-	m_InFlightCommandBuffers.push_back(spare_buffer);
+        m_InFlightCommandBuffers.push_back(spare_buffer);
     }
 
 }

@@ -1,17 +1,15 @@
 #ifndef STATEMACHINE_H
 #define STATEMACHINE_H
-#include "json.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
 #include <random>
 #include <algorithm>
-//#include <cstdlib.h>
 #include <vector>
+#include <deque>
 #include <string>
 #include <thread>
 #include <chrono>
-//#define JSON_IS_AMALGAMATION
 
 
 class StateMachine

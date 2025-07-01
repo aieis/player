@@ -1,5 +1,4 @@
 #include "parse_spec.h"
-#include <spdlog/spdlog.h>
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
 #include <algorithm>
@@ -24,8 +23,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
-#include "spdlog/sinks/stdout_sinks.h"
+#include "spdlog/sinks/ansicolor_sink.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 
 #include "imgui_impl_glfw.h"
@@ -44,10 +44,10 @@
 
 void init_logger(const std::string log_file) {
     std::vector<spdlog::sink_ptr> sinks;
-    sinks.push_back(std::make_shared<spdlog::sinks::stdout_sink_mt>());
+    sinks.push_back(std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>());
     sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_file.c_str(), 4 * 1024 * 1024, 10));
     auto logger = std::make_shared<spdlog::logger>("logger", begin(sinks), end(sinks));
-    logger->set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
+    logger->set_pattern("%^[%Y-%m-%d %H:%M:%S %z] [%n] [---%L---] [thread %t] %v%$");
     spdlog::set_default_logger(logger);
     spdlog::flush_on(spdlog::level::trace);
 }
@@ -69,29 +69,20 @@ static void glfw_error_callback (int error, const char *description)
 }
 
 
-int main_player(const char* movie, int flip_method, Base_SM* state_machine)
+int main_player(const char* movie, int flip_method, Base_SM* state_machine, bool vsync, bool debug)
 {
     srand(time(NULL));
 
     const int q_size = 48;
 
-    Graph ft_graph {2000, 0, 0.5};
-    Graph fps_graph {2000, 0, 70};
-    Graph qlen_graph {2000, 0, q_size * 1.5};
-
-    ListView msg_hist {100};
-    ListView clip_hist {100};
-
-    decdata_f ftdata = [&](DecoderData p) {
-        ft_graph.add(p.tt, p.decode_time);
-        //qlen_graph.add(p.tt, p.queue_size);
-    };
+    ListView msg_hist (100);
+    ListView clip_hist (100);
 
     addstr_f msgdata = [&](std::string s) { msg_hist.add(s);};
     addstr_f clipdata = [&](std::string s) { clip_hist.add(s);};
 
     std::shared_ptr<Decoder> decoder;
-    decoder.reset(new Decoder(std::string(movie), flip_method, state_machine, q_size, ftdata, msgdata, clipdata));
+    decoder.reset(new Decoder(std::string(movie), flip_method, state_machine, q_size));
     decoder->init();
 
     int width = decoder->get_width();
@@ -99,7 +90,17 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
     double framerate = decoder->get_framerate();
     double frametime_ns = 1000000000.0 / framerate;
 
-    std::thread decoder_thread ([&] {decoder->play();});
+    int max_graph_elems = (int) (framerate * 2 * 60) * 10;
+
+    Graph ft_graph (max_graph_elems, 0, 0.5);
+    Graph fps_graph (max_graph_elems, 0, 70);
+    Graph qlen_graph (max_graph_elems, 0, q_size * 1.5);
+
+    decdata_f ftdata = [&](DecoderData p) {
+        ft_graph.add(p.tt, p.decode_time);
+    };
+
+    std::thread decoder_thread ([&] {decoder->play(ftdata, msgdata, clipdata);});
 
     glfwSetErrorCallback (glfw_error_callback);
     if (!glfwInit ())
@@ -115,14 +116,14 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
 
     if (!glfwVulkanSupported())
     {
-	spdlog::info("GLFW: Vulkan Not Supported");
+        spdlog::info("GLFW: Vulkan Not Supported");
         return 1;
     }
 
     VulkanInterface interface{};
     uint32_t extensions_count = 0;
     const char** extensions = glfwGetRequiredInstanceExtensions(&extensions_count);
-    interface.SetupVulkan(extensions, extensions_count);
+    interface.SetupVulkan(extensions, extensions_count, debug);
 
     // Create Window Surface
     VkSurfaceKHR surface;
@@ -133,7 +134,7 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
     int w, h;
     glfwGetFramebufferSize(window, &w, &h);
     ImGui_ImplVulkanH_Window* wd = &interface.g_MainWindowData;
-    interface.SetupVulkanWindow(wd, surface, w, h);
+    interface.SetupVulkanWindow(wd, surface, w, h, vsync);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -160,7 +161,7 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
     TextureData frame_textures [NUM_TEXTURES];
 
     for (int i = 0; i < NUM_TEXTURES; i++) {
-	interface.LoadTextureFromData(&frame_textures[i], init_data, width, height);
+        interface.LoadTextureFromData(&frame_textures[i], init_data, width, height);
     }
 
     free(init_data);
@@ -203,17 +204,35 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
 
     int show_debug = 0;
     double total_time = 0;
-    auto t1 = std::chrono::steady_clock::now();
-    auto t2 = t1;
     double elapsed_time;
-    auto end = t1 + std::chrono::milliseconds(33);
     unsigned long slow_frames = 0;
-    while (!glfwWindowShouldClose(window)) {
-	glfwPollEvents();
-        t2 = std::chrono::steady_clock::now();
-        if (t2 >= end)
-        {
 
+    auto frame_interval = std::chrono::nanoseconds((int)frametime_ns);
+    auto next_frame_update = std::chrono::steady_clock::now();
+    auto prev_render = std::chrono::steady_clock::now();
+
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+        auto current_time = std::chrono::steady_clock::now();
+
+        bool update_frame = current_time >= next_frame_update;
+        if (update_frame)
+        {
+            frame_t frame;
+            if (decoder->pop(frame)) {
+                current_texture = (current_texture + 1) % NUM_TEXTURES;
+                interface.UpdateTexture(&frame_textures[current_texture], frame.data, image_size);
+                decoder->return_frame(frame);
+            } else {
+                slow_frames ++;
+            }
+
+            qlen_graph.add(total_time, decoder->get_queue_size());
+            next_frame_update = current_time + frame_interval;
+        }
+
+
+        if (vsync || update_frame) {
             if (interface.g_SwapChainRebuild) {
                 int w, h;
                 glfwGetFramebufferSize(window, &w, &h);
@@ -225,16 +244,10 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
                 }
             }
 
-	    frame_t frame;
-	    if (decoder->pop(frame)) {
-		current_texture = (current_texture + 1) % NUM_TEXTURES;
-                interface.UpdateTexture(&frame_textures[current_texture], frame.data, image_size);
-		decoder->return_frame(frame);
-            } else {
-                slow_frames ++;
-            }
 
-            qlen_graph.add(total_time, decoder->get_queue_size());
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
 
             if (ImGui::IsKeyPressed(ImGuiKey_A)) {
                 show_debug = !show_debug;
@@ -244,9 +257,6 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
                 break;
             }
 
-            ImGui_ImplVulkan_NewFrame();
-            ImGui_ImplGlfw_NewFrame();
-            ImGui::NewFrame();
 
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
             ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -284,26 +294,27 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine)
                 clip_hist.draw("Clip History", nwidth, nheight / 2);
                 ImGui::End();
             } else {
-		ImGui::SetMouseCursor(ImGuiMouseCursor_None);
-	    }
+                ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+            }
 
             ImGui::Render();
 
             ImDrawData* draw_data = ImGui::GetDrawData();
             interface.FrameRender(wd, draw_data);
             interface.FramePresent(wd);
-	    elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() / 1000;
-	    t1 = t2;
-	    end = t2 + std::chrono::nanoseconds((int)frametime_ns);
-	    total_time += elapsed_time;
-	    fps_graph.add(total_time, 1.0 / elapsed_time);
+
+            elapsed_time = (double)std::chrono::duration_cast<std::chrono::milliseconds>(current_time - prev_render).count() / 1000;
+            total_time += elapsed_time;
+            fps_graph.add(total_time, 1.0 / elapsed_time);
+
+            prev_render = current_time;
         }
     }
 
     err = vkDeviceWaitIdle(interface.g_Device);
     check_vk_result(err);
     for (int i = 0; i < NUM_TEXTURES; i++) {
-	interface.RemoveTexture(&frame_textures[i]);
+        interface.RemoveTexture(&frame_textures[i]);
     }
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -336,13 +347,22 @@ int main(int argc, char **argv)
     argparse::ArgumentParser program("rrvp");
 
     program.add_argument("-m", "--movie")
-        .default_value(std::string{"./vid/vid.mp4"});
+        .help("Path to the movie file.")
+        .default_value("./vid/vid.mp4");
 
     program.add_argument("-s", "--spec")
+        .help("Path to the state machine file.")
         .default_value("./vid/spec.txt");
 
-    program.add_argument("-r", "--rotation")
-        .default_value(0);
+    program.add_argument("--vsync")
+        .help("Enable/disable VSync.")
+        .default_value(false)
+        .implicit_value(true);
+
+    program.add_argument("--debug")
+        .help("Run with more debug information.")
+        .default_value(false)
+        .implicit_value(true);
 
 
     try {
@@ -356,6 +376,8 @@ int main(int argc, char **argv)
 
     auto movie = program.get<std::string>("--movie");
     auto spec = program.get<std::string>("--spec");
+    bool vsync = program["--vsync"] == true;
+    bool debug = program["--debug"] == true;
 
     std::filesystem::path current_exe = std::string(argv[0]);
     auto log = current_exe.parent_path();
@@ -367,11 +389,11 @@ int main(int argc, char **argv)
 
     Base_SM* state_machine = nullptr;
     if (spec.ends_with(".json")) {
-	state_machine = new BigBloom(spec);
+        state_machine = new BigBloom(spec);
     } else {
-	state_machine = new Bird(spec);
+        state_machine = new Bird(spec);
     }
     gst_init (&argc, &argv);
-    main_player(movie.c_str(), 0, state_machine);
+    main_player(movie.c_str(), 0, state_machine, vsync, debug);
     return 0;
 }

@@ -36,11 +36,13 @@ class Decoder
     addstr_f clip_changed;
 
     std::string movie;
-    Base_SM* state_machine;
     int width;
     int height;
     double framerate;
     std::string format;
+
+    Base_SM* state_machine;
+
 
     bool running;
 
@@ -50,13 +52,13 @@ class Decoder
 
  public:
 
-    Decoder(std::string movie, int flip_mehtod, Base_SM* state_machine, size_t q_size, decdata_f submit_data, addstr_f msg_hist, addstr_f clip_hist);
+    Decoder(std::string movie, int flip_mehtod, Base_SM* state_machine, size_t q_size);
     ~Decoder();
 
     void reset();
     bool init();
 
-    void play();
+    void play(decdata_f submit_data, addstr_f msg_hist, addstr_f clip_hist);
     void stop();
     void submit_frame(GstSample* sample_frame);
 

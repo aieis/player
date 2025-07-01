@@ -70,7 +70,7 @@ void bus_handle_msgs(GstBus* bus, std::function<void(std::string)> send_msg)
 }
 
 
-Decoder::Decoder(std::string i_movie, int flip_method, Base_SM* i_sm, size_t q_size, decdata_f i_submit_data, addstr_f i_msg_hist, addstr_f i_clip_hist)
+Decoder::Decoder(std::string i_movie, int flip_method, Base_SM* i_sm, size_t q_size)
 {
     width = 0;
     height = 0;
@@ -79,9 +79,6 @@ Decoder::Decoder(std::string i_movie, int flip_method, Base_SM* i_sm, size_t q_s
 
     movie = i_movie;
     state_machine = i_sm;
-    submit_data = i_submit_data;
-    send_msg = i_msg_hist;
-    clip_changed = i_clip_hist;
 
     qmax = q_size;
     frames = moodycamel::BlockingReaderWriterQueue<frame_t>(qmax);
@@ -225,8 +222,7 @@ void Decoder::submit_frame(GstSample* sample_frame)
 
         frame_t frame;
         if (!spares.try_dequeue(frame)) {
-            spdlog::warn("No spare frames, creating a new one.");
-            frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
+	    frame.data = reinterpret_cast<uint8_t*>(malloc(frame_size));
         }
 
         memcpy(frame.data, map.data, frame_size);
@@ -236,23 +232,25 @@ void Decoder::submit_frame(GstSample* sample_frame)
 
 }
 
-void Decoder::play()
+void Decoder::play(decdata_f submit_data, addstr_f send_msg, addstr_f clip_changed)
 {
     Clip cclip = state_machine->current();
     int start = cclip.start;
     int end = cclip.end;
     int current_frame = start;
 
-    double start_ts = ((double) start - 1) / framerate;
+    double start_ts = ((double) current_frame - 1) / framerate;
 
-    gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET  ,
+
+    spdlog::info("Starting playback with segment {}: {} - {}.", cclip.name, start, end);
+
+    gst_element_seek (pipe.pipeline, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,
                       start_ts * GST_SECOND,
                       GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
 
     GstSample* sample_frame = wait_for_sample(GST_APP_SINK(pipe.sink), start_ts);
     if (!sample_frame) {
-        spdlog::error("Fatal error encountered. Could not seek to start point.");
-        exit(1);
+        spdlog::critical("Fatal error encountered. Could not seek to start point.");
     }
 
     submit_frame(sample_frame);
@@ -295,8 +293,9 @@ void Decoder::play()
 
                     GstSample* sample_frame = wait_for_sample(GST_APP_SINK(pipe.sink), start_ts);
                     if (!sample_frame) {
-                        spdlog::critical("Fatal error encountered. Could not seek to previous point.");
-			continue;
+                        spdlog::critical("Fatal error encountered. Could not seek to previous point. Going back as far as possible.");
+                        reset();
+                        return play(submit_data, send_msg, clip_changed);
                     }
 
                     submit_frame(sample_frame);
@@ -330,7 +329,8 @@ void Decoder::play()
             current_frame = start;
             start_ts = ((double)current_frame - 1) / framerate;
 
-            spdlog::info("Seeking frame {} => {}", start, start_ts);
+	    spdlog::info("State {{name: '{}', start: {}, end: {} }}", cclip.name, cclip.start, cclip.end);
+	    spdlog::info("Seeking frame {} => {}", start, start_ts);
 
             if (!gst_element_seek(pipe.pipeline, 1.0, GST_FORMAT_TIME,
                                   GST_SEEK_FLAG_FLUSH, GST_SEEK_TYPE_SET,

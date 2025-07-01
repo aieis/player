@@ -5,6 +5,7 @@
 
 ListView::ListView(size_t isize)
 {
+    pos = 0;
     size = isize;
 }
 
@@ -12,15 +13,16 @@ void ListView::add(std::string item)
 {
     items.insert(items.begin(), item);
     if (items.size() > size) {
-        items.pop_back();
+        items[pos] = item;
+        pos = (pos + 1) % size;
     }
 }
 
 void ListView::draw(std::string pname, float width, float height)
 {
     std::vector<const char*> citems;
-    for (auto&& s : items) {
-        citems.push_back(s.c_str());
+    for (size_t i = 0; i < items.size(); i++) {
+        citems.push_back(items[(i + pos) % size].c_str());
     }
 
     int current_item = 0;

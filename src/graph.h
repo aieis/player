@@ -8,10 +8,11 @@ class Graph {
     std::vector<double> ys;
 
     std::vector<double> xs_rel;
+    std::vector<double> ys_rel;
 
     size_t index;
     size_t count;
-    size_t size;
+    size_t pos;
 
     double ymin;
     double ymax;

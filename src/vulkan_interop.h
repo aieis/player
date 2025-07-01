@@ -31,7 +31,7 @@ struct SpareCommandBuffer {
 
 class VulkanInterface {
 
- public:
+public:
     VkAllocationCallbacks*   g_Allocator = NULL;
     VkInstance               g_Instance = VK_NULL_HANDLE;
     VkPhysicalDevice         g_PhysicalDevice = VK_NULL_HANDLE;
@@ -47,17 +47,19 @@ class VulkanInterface {
     int                      g_MinImageCount = 2;
     bool                     g_SwapChainRebuild = false;
 
-
     VkCommandPool m_SpareCommandPool;
     std::vector<SpareCommandBuffer> m_SpareCommandBuffers;
     std::vector<SpareCommandBuffer> m_InFlightCommandBuffers;
+
+
+    bool m_Debug = false;
     
 public:
 
     void CollectCommandBuffers();
     ImGui_ImplVulkan_InitInfo makeInfo();
-    void SetupVulkan(const char** extensions, uint32_t extensions_count);
-    void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height);
+    void SetupVulkan(const char** extensions, uint32_t extensions_count, bool debug);
+    void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height, bool vsync);
     void CleanupVulkan();
     void CleanupVulkanWindow();
     void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data);

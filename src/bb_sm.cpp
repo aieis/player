@@ -1,9 +1,8 @@
 #include "bb_sm.h"
+
 #include <vector>
-//using namespace std;
-//#define JSON_IS_AMALGAMATION
 
-
+#include "json.h"
 
 
 StateMachine::StateMachine(){
@@ -49,6 +48,17 @@ bool StateMachine::parseFile(std::string _fileLocation){
         else{
 	    _earlyExits.push_back(state);
         }
+
+
+	std::cout <<
+	    "State {" <<
+	    "  name: '" << state.name << "'" <<
+	    ", start: " << state.startTime <<
+	    ", end: " << state.endTime <<
+	    ", early_exit: " << state.isEarlyExit <<
+	    " }" <<
+	    std::endl;
+
     }
 
     for(size_t s = 0; s < _states.size(); s ++){
@@ -95,12 +105,11 @@ bool StateMachine::parseFile(std::string _fileLocation){
     }
 
 
-    for(auto _state : states){
-        if(_state.position == 2){
-	    regrowths.push_back(_state);
+    for(auto state : states){
+        if(state.position == 2){
+	    regrowths.push_back(state);
         }
     }
-
     return true;
 }
 
@@ -282,56 +291,4 @@ void StateMachine::updateSegment(){
 /* Input is frame */
 bool StateMachine::updateFrame(int){
     return true;
-}
-
-
-// Returns sorted frames where early exits happen
-std::vector<int> StateMachine::getSortedEarlyExitFrames() {
-    std::vector<int> frames;
-
-    // Go through all states
-    for (auto& state : states) {
-        // If state has early exits
-        if (state.hasEarlyExits) {
-            // Add each early exit's transition frame
-            for (auto& exit : state.earlyExits) {
-                frames.push_back(exit.transitionFromParent);
-            }
-        }
-    }
-
-    // Sort the frames
-    std::sort(frames.begin(), frames.end());
-
-    return frames;
-}
-
-// Returns sorted start frames of regrowth states
-std::vector<int> StateMachine::getSortedRegrowthStartFrames() {
-    std::vector<int> frames;
-
-    // Add all regrowth start frames
-    for (auto& regrowth : regrowths) {
-        frames.push_back(regrowth.startTime);
-    }
-
-    // Sort them
-    std::sort(frames.begin(), frames.end());
-
-    return frames;
-}
-
-// Returns sorted end frames of regrowth states
-std::vector<int> StateMachine::getSortedRegrowthEndFrames() {
-    std::vector<int> frames;
-
-    // Add all regrowth end frames
-    for (auto& regrowth : regrowths) {
-        frames.push_back(regrowth.endTime);
-    }
-
-    // Sort them
-    std::sort(frames.begin(), frames.end());
-
-    return frames;
 }

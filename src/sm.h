@@ -16,6 +16,7 @@ class Base_SM {
 public:
     virtual Clip next() = 0;
     virtual Clip current() = 0;
+    virtual Clip seek(const std::string& clip_name) = 0;
 };
 
 
@@ -31,6 +32,7 @@ public:
     ~Bird();
     Clip next();
     Clip current();
+    Clip seek(const std::string& clip_name);
 };
 
 
@@ -44,6 +46,7 @@ public:
     ~BigBloom();
     Clip next();
     Clip current();
+    Clip seek(const std::string& clip_name);
 };
 
 #endif // _SM_H

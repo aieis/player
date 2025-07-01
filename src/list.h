@@ -5,6 +5,8 @@
 
 class ListView {
     size_t size;
+    size_t pos;
+
     std::vector<std::string> items;
  public:
     ListView(size_t isize);
