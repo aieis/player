@@ -156,7 +156,7 @@ int main_player(const char* movie, int flip_method, Base_SM* state_machine, bool
     char* init_data = reinterpret_cast<char*>(malloc(image_size));
     memset(init_data, 0, image_size);
 
-    constexpr int NUM_TEXTURES = 10;
+    constexpr int NUM_TEXTURES = 4;
     int current_texture = NUM_TEXTURES;
     TextureData frame_textures [NUM_TEXTURES];
 
